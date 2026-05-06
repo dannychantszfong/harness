@@ -31,6 +31,7 @@ harness run output/my_app_a3f8c21b/config.yaml
 
 # 4. Other commands
 harness runners                  # list all runners with requirements
+harness animation-theme "moonlit ritual" --runner codex
 harness status output/my_app_a3f8c21b/config.yaml
 ```
 
@@ -167,6 +168,15 @@ When the harness is waiting on a silent blocking step, it shows a small terminal
 ```
 
 Built-in animation packs: `sparkle`, `bloom`, `snow`, `braille`, `orbit`, `pulse`, `dots`, `moon`, `bars`, `clock`, `wave`, `tech`. The playful phrase style uses restrained magical verbs like `Scrying`, `Inscribing`, `Warding`, and `Attuning`.
+
+To change the playful verb theme, ask one of your signed-in coding agents to patch the local Harness checkout:
+
+```bash
+harness animation-theme "frostbound library" --runner codex --model gpt-5.2
+harness animation-theme "quiet moonlit ritual" --runner subprocess
+```
+
+The command launches Claude Code or Codex with a narrow guide for editing `PHRASES["playful"]` in `harness/ui/spinner.py`. It keeps the output as single verbs, so the spinner stays like `Scrying`, not `Scrying with Claude Code`.
 
 The animation runs only in interactive terminals and writes to stderr, so logs and piped output stay clean. Disable it with:
 

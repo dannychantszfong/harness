@@ -63,6 +63,35 @@ harness runners
 
 ---
 
+### `harness animation-theme <theme>`
+
+Ask a signed-in coding agent to rewrite the playful quiet-animation verbs in the local Harness checkout.
+
+```bash
+harness animation-theme "frostbound library" --runner codex --model gpt-5.2
+harness animation-theme "quiet moonlit ritual" --runner subprocess
+```
+
+The command is intentionally limited to agentic runners because the task requires file edits.
+
+**Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `theme` | text | Theme or mood to translate into animation verbs |
+
+**Options:**
+
+| Option | Short | Choices | Description |
+|--------|-------|---------|-------------|
+| `--runner` | `-r` | `subprocess`, `sdk`, `codex` | Signed-in coding agent to use |
+| `--model` | | text | Optional Claude Code/Codex model override |
+| `--timeout` | | seconds | Maximum wait for the theme edit |
+
+The invoked agent follows `docs/technical/animation_theme_agent_guide.md`, editing `PHRASES["playful"]` in `harness/ui/spinner.py` with short single verbs only.
+
+---
+
 ### `harness status <config_file>`
 
 Print current project progress. No API calls.

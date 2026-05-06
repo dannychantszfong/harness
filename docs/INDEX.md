@@ -88,6 +88,8 @@ Silent waits use a lightweight pulse so the process feels alive without pollutin
 
 Use `progress_animation` to choose packs such as `sparkle`, `bloom`, `braille`, `orbit`, `pulse`, or `bars`. The playful phrase style stays to single magical verbs. Use `progress_text_effect` for `none`, `typewriter`, or `scramble`. Set `HARNESS_NO_SPINNER=1` to disable it.
 
+Use `harness animation-theme "frostbound library" --runner codex` to have a signed-in coding agent rewrite `PHRASES["playful"]` in `harness/ui/spinner.py`. The agent follows [animation_theme_agent_guide.md](technical/animation_theme_agent_guide.md), keeping the words as restrained single verbs.
+
 ---
 
 ## Standard Loop Reference

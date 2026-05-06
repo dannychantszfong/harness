@@ -57,6 +57,38 @@ def _prompt_runner() -> RunnerType:
     return RunnerType(value)
 
 
+def _agentic_runner_values() -> list[str]:
+    """Runner values that can edit files through a signed-in coding agent."""
+    return [runner.value for runner in RunnerType.agentic()]
+
+
+def _print_agentic_runner_menu() -> None:
+    table = Table(title="Agentic Runners", show_header=True, header_style="bold cyan")
+    table.add_column("Runner", style="bold")
+    table.add_column("Billing")
+    table.add_column("Requires", style="dim")
+
+    agentic = set(_agentic_runner_values())
+    for value, _family, billing, _file_io, requires in _RUNNER_TABLE:
+        if value in agentic:
+            table.add_row(value, billing, requires)
+
+    console.print()
+    console.print(table)
+    console.print()
+
+
+def _prompt_agentic_runner() -> RunnerType:
+    """Interactively ask for a runner that can write the theme into the code."""
+    _print_agentic_runner_menu()
+    value = click.prompt(
+        "Choose the signed-in agent to edit the theme",
+        type=click.Choice(_agentic_runner_values(), case_sensitive=False),
+        default=RunnerType.SUBPROCESS.value,
+    )
+    return RunnerType(value)
+
+
 def _resolve_runner(config: HarnessConfig, runner_flag: str | None) -> RunnerType:
     """Resolve runner with priority: CLI flag > config file > interactive prompt."""
     if runner_flag:
@@ -161,6 +193,56 @@ def _require_anthropic_key_for_api_mode(orchestration_mode: str) -> None:
             )
         )
         raise SystemExit(1)
+
+
+def _harness_source_root() -> Path:
+    """Find the local Harness checkout that the theme agent should edit."""
+    cli_root = Path(__file__).resolve().parent
+    candidates = [cli_root, Path.cwd().resolve()]
+    for root in candidates:
+        if (root / "harness" / "ui" / "spinner.py").exists():
+            return root
+    raise click.UsageError(
+        "Could not find harness/ui/spinner.py. Run this command from the "
+        "Harness source checkout."
+    )
+
+
+def _load_animation_theme_guide(root: Path) -> str:
+    guide_path = root / "docs" / "technical" / "animation_theme_agent_guide.md"
+    if guide_path.exists():
+        return guide_path.read_text()
+    return (
+        "# Animation Theme Agent Guide\n\n"
+        "Edit harness/ui/spinner.py, specifically PHRASES[\"playful\"]. "
+        "Use short single Title Case verbs only. Keep PHRASES[\"steady\"] "
+        "unchanged. Do not add suffixes like 'with Claude Code' or full phrases. "
+        "Run python -m pytest tests/test_spinner.py."
+    )
+
+
+def _build_animation_theme_prompt(theme: str, guide: str) -> str:
+    return f"""You are editing the Agent Harness terminal animation theme.
+
+User-requested theme:
+{theme}
+
+Your task:
+- Update the playful quiet-animation verb pools in `harness/ui/spinner.py`.
+- Edit only `PHRASES["playful"]` unless a test has to be adjusted.
+- Generate tasteful, restrained words that match the theme.
+- Keep every entry a single Title Case verb or gerund, like `Scrying` or `Inscribing`.
+- Use 4-8 words per phase: `planning`, `coding`, `evaluating`, and `waiting`.
+- Do not add prefixes, suffixes, agent names, subjects, slogans, or phrases.
+- Do not use words like `Cooking`, `Vibing`, memes, or loud joke wording.
+- Do not change frame packs, spinner mechanics, user planning notes, generated output, logs, or cache files.
+- Run `python -m pytest tests/test_spinner.py`.
+- Do not commit. Leave a concise final summary with files changed, the interpreted theme, and tests run.
+
+Reference guide:
+
+{guide}
+"""
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -449,6 +531,110 @@ def resume(project_dir: str, runner: str | None, model: str | None):
     _apply_model_override(config, runner_type, model)
     orchestrator = Orchestrator(config, runner_type=runner_type)
     orchestrator.run()
+
+
+@main.command("animation-theme")
+@click.argument("theme_words", nargs=-1)
+@click.option(
+    "--runner", "-r",
+    type=click.Choice(_agentic_runner_values(), case_sensitive=False),
+    default=None,
+    help="Signed-in coding agent to use for editing the theme.",
+)
+@click.option(
+    "--model", "model",
+    default=None,
+    help="Override the coding-agent model for this theme edit.",
+)
+@click.option(
+    "--timeout",
+    default=900,
+    show_default=True,
+    type=click.IntRange(min=60),
+    help="Maximum seconds to wait for the coding agent.",
+)
+def animation_theme(
+    theme_words: tuple[str, ...],
+    runner: str | None,
+    model: str | None,
+    timeout: int,
+):
+    """Ask Claude Code or Codex to rewrite the quiet-animation verb theme.
+
+    The command starts the selected signed-in coding agent and gives it a
+    narrow patch task: update the playful verb pools in harness/ui/spinner.py.
+    The new words are then present the next time the project is run.
+    """
+    theme = " ".join(theme_words).strip()
+    if not theme:
+        theme = click.prompt("Theme / mood").strip()
+    if not theme:
+        raise click.UsageError("Theme cannot be empty.")
+
+    runner_type = RunnerType(runner) if runner else _prompt_agentic_runner()
+    if runner_type not in RunnerType.agentic():
+        raise click.UsageError("animation-theme requires an agentic runner.")
+
+    root = _harness_source_root()
+    guide = _load_animation_theme_guide(root)
+    prompt = _build_animation_theme_prompt(theme, guide)
+
+    config = HarnessConfig(
+        project_name="Agent Harness Animation Theme",
+        brief=f"Customize quiet terminal animation verbs: {theme}",
+        output_dir=str(root),
+        orchestration_mode="runner",
+        code_runner=runner_type.value,
+    )
+    _apply_model_override(config, runner_type, model)
+
+    from harness.runners import create_runner
+    code_runner = create_runner(runner_type, config)
+    preflight = code_runner.preflight()
+    if not preflight.ok:
+        console.print(
+            Panel(
+                f"[bold]{preflight.summary}[/bold]\n\n"
+                f"{preflight.error or preflight.details or 'Runner is not ready.'}",
+                title="[red]Theme Agent Unavailable[/red]",
+                border_style="red",
+            )
+        )
+        raise SystemExit(1)
+    if preflight.warning:
+        console.print(
+            Panel(
+                preflight.warning,
+                title="[yellow]Theme Agent Warning[/yellow]",
+                border_style="yellow",
+            )
+        )
+
+    console.print(
+        Panel(
+            f"[bold]Theme:[/bold] {theme}\n"
+            f"[bold]Agent:[/bold] {runner_type.value}\n"
+            f"[bold]Target:[/bold] harness/ui/spinner.py",
+            title="[cyan]Animation Theme[/cyan]",
+            border_style="cyan",
+        )
+    )
+    result = code_runner.implement(prompt, cwd=str(root), timeout_seconds=timeout)
+    if not result.success:
+        console.print(
+            Panel(
+                result.error or "The theme agent exited without a usable result.",
+                title="[red]Animation Theme Failed[/red]",
+                border_style="red",
+            )
+        )
+        raise SystemExit(1)
+
+    console.print("[green]Animation theme agent finished.[/green]")
+    if result.output:
+        console.print(
+            Panel(result.output[-3000:], title="Agent Summary", border_style="green")
+        )
 
 
 @main.command()

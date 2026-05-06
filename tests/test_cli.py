@@ -19,7 +19,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+import cli
 from cli import main
+from harness.runners.base import PreflightResult, RunResult
 
 
 @pytest.fixture
@@ -101,6 +103,76 @@ def test_new_persists_agentic_coding_model(runner, tmp_path, monkeypatch):
     assert len(config_files) == 1
     saved = yaml.safe_load(config_files[0].read_text())
     assert saved["code_runner_model"] == "gpt-5.2"
+
+
+# ── `harness animation-theme` ────────────────────────────────────────────────
+
+def test_animation_theme_invokes_agentic_runner(runner, tmp_path, monkeypatch):
+    """Theme customization should hand a precise patch task to a signed-in agent."""
+    root = tmp_path
+    (root / "harness" / "ui").mkdir(parents=True)
+    (root / "harness" / "ui" / "spinner.py").write_text("PHRASES = {}\n")
+    (root / "docs" / "technical").mkdir(parents=True)
+    (root / "docs" / "technical" / "animation_theme_agent_guide.md").write_text(
+        "Guide marker: edit PHRASES[\"playful\"]."
+    )
+    monkeypatch.setattr(cli, "_harness_source_root", lambda: root)
+
+    captured = {}
+
+    class FakeRunner:
+        def preflight(self):
+            return PreflightResult(ok=True, summary="ready", details="fake")
+
+        def implement(self, prompt, cwd, timeout_seconds=600):
+            captured["prompt"] = prompt
+            captured["cwd"] = cwd
+            captured["timeout"] = timeout_seconds
+            return RunResult(output="changed harness/ui/spinner.py", success=True)
+
+    def fake_create_runner(runner_type, config):
+        captured["runner_type"] = runner_type
+        captured["config"] = config
+        return FakeRunner()
+
+    monkeypatch.setattr("harness.runners.create_runner", fake_create_runner)
+
+    result = runner.invoke(
+        main,
+        [
+            "animation-theme",
+            "frost",
+            "library",
+            "--runner",
+            "codex",
+            "--model",
+            "gpt-test",
+            "--timeout",
+            "123",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["runner_type"].value == "codex"
+    assert captured["config"].code_runner == "codex"
+    assert captured["config"].code_runner_model == "gpt-test"
+    assert captured["cwd"] == str(root)
+    assert captured["timeout"] == 123
+    assert "frost library" in captured["prompt"]
+    assert "harness/ui/spinner.py" in captured["prompt"]
+    assert 'PHRASES["playful"]' in captured["prompt"]
+    assert "single Title Case verb" in captured["prompt"]
+    assert "Guide marker" in captured["prompt"]
+    assert "Animation theme agent finished" in result.output
+
+
+def test_animation_theme_rejects_api_runner(runner):
+    """API runners are text-only, so the command only accepts agentic runners."""
+    result = runner.invoke(main, ["animation-theme", "moon", "--runner", "openai"])
+    assert result.exit_code != 0
+    assert "invalid value" in result.output.lower()
+    assert "subprocess" in result.output
+    assert "codex" in result.output
 
 
 # ── `harness resume` ─────────────────────────────────────────────────────────
