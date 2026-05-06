@@ -125,11 +125,11 @@ Runner selection needs to be flexible for both first-time users (want guidance) 
 ### Decision
 Resolve runner with this priority:
 1. `--runner` / `-r` CLI flag — highest; useful for scripting and one-off overrides
-2. `code_runner:` in YAML config — for projects that always use the same runner
+2. `"code_runner"` in `harness_config.json` — for projects that always use the same runner
 3. Interactive prompt — shown only when neither of the above is set
 
 ### Rationale
-- CLI flag enables scripting (`harness run config.yaml -r subprocess`) without touching config
+- CLI flag enables scripting (`harness run harness_config.json -r subprocess`) without touching config
 - Config field enables "set it and forget it" per-project defaults
 - Interactive prompt with a formatted table ensures new users understand their options
 - No hidden defaults — if the user hasn't chosen, they're asked

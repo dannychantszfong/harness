@@ -13,19 +13,19 @@ Run the full harness end-to-end (Initialize → Plan → Feature Loop).
 
 ```bash
 # Prompted to select runner interactively
-harness run examples/web_app.yaml
+harness run output/web_app_a3f8c21b/harness_config.json
 
 # Skip prompt with --runner / -r
-harness run examples/web_app.yaml --runner subprocess
-harness run examples/web_app.yaml -r sdk
-harness run examples/web_app.yaml -r codex
+harness run output/web_app_a3f8c21b/harness_config.json --runner subprocess
+harness run output/web_app_a3f8c21b/harness_config.json -r sdk
+harness run output/web_app_a3f8c21b/harness_config.json -r codex
 ```
 
 **Arguments:**
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `config_file` | path | YAML config file (must exist) |
+| `config_file` | path | Harness config file, usually `harness_config.json` |
 
 **Options:**
 
@@ -97,7 +97,7 @@ The invoked agent follows `docs/technical/animation_theme_agent_guide.md`, editi
 Print current project progress. No API calls.
 
 ```bash
-harness status examples/web_app.yaml
+harness status output/web_app_a3f8c21b/harness_config.json
 ```
 
 ---
@@ -107,7 +107,7 @@ harness status examples/web_app.yaml
 Run only the initialization phase.
 
 ```bash
-harness init examples/web_app.yaml "A todo app with Kanban view"
+harness init output/web_app_a3f8c21b/harness_config.json "A todo app with Kanban view"
 ```
 
 **Options:** `--project-name TEXT`
@@ -119,7 +119,7 @@ harness init examples/web_app.yaml "A todo app with Kanban view"
 Run only the planner agent to expand the brief into a spec.
 
 ```bash
-harness plan examples/web_app.yaml
+harness plan output/web_app_a3f8c21b/harness_config.json
 ```
 
 ---
@@ -131,7 +131,7 @@ harness plan examples/web_app.yaml
 ```python
 from harness.config import HarnessConfig
 
-config = HarnessConfig.from_yaml("examples/web_app.yaml")
+config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 ```
 
 **Config fields:**
@@ -166,7 +166,7 @@ config = HarnessConfig.from_yaml("examples/web_app.yaml")
 from harness import Orchestrator, HarnessConfig
 from harness.runners import RunnerType
 
-config = HarnessConfig.from_yaml("examples/web_app.yaml")
+config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 
 # Runner from config/prompt
 orchestrator = Orchestrator(config)
@@ -225,71 +225,40 @@ result = runner.implement(prompt, cwd="/my/project")
 
 ---
 
-## YAML Config Reference
+## JSON Config Reference
 
-```yaml
-# ── Required ─────────────────────────────────────────────────────────────────
-project_name: "my-web-app"
-brief: >
-  A task management web app where users can create projects, add tasks
-  with due dates and priorities, mark tasks complete, and view a Kanban board.
-
-# ── Output ───────────────────────────────────────────────────────────────────
-output_dir: "./output/web_app"
-
-# ── Runner ───────────────────────────────────────────────────────────────────
-# Three coding-agent runners only. Leave null to be prompted.
-#   subprocess  — Claude Code CLI
-#   sdk         — Claude Code SDK
-#   codex       — Codex CLI
-# Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) plug in via
-# env vars below; they are not standalone runners.
-code_runner: null
-code_runner_model: null        # Claude Code/Codex --model, or runner default
-codex_oss: false               # use Codex OSS provider routing
-codex_local_provider: null     # ollama | lmstudio
-code_runner_extra_args: []     # advanced runner CLI flags
-
-# ── API keys (documentation only — set the env vars in your shell) ───────────
-# These fields persist what a project expects so it's reproducible. The
-# harness does NOT auto-export them to the runner subprocess.
-#   ANTHROPIC_API_KEY     → Claude Code / SDK (Claude API mode)
-#   OPENAI_API_KEY        → Codex (OpenAI API mode)
-#   GEMINI_API_KEY        → routed via Codex custom provider or OpenRouter
-#   ANTHROPIC_BASE_URL +
-#   ANTHROPIC_AUTH_TOKEN  → Claude Code via OpenRouter (token = OpenRouter key)
-openai_api_key: null
-gemini_api_key: null
-openrouter_api_key: null
-
-# ── Model selection ──────────────────────────────────────────────────────────
-# In runner orchestration mode (default), all four agents use the selected
-# coding-agent runtime, and code_runner_model controls the model behind it.
-# In api orchestration mode (--with-api), planner/evaluator/initializer use
-# the Anthropic API directly with the *_model fields below; the generator
-# still uses code_runner_model via the agentic runner.
-planner_model: "claude-opus-4-7"
-generator_model: "claude-opus-4-7"
-evaluator_model: "claude-opus-4-7"
-
-# ── GAN loop ─────────────────────────────────────────────────────────────────
-max_iterations_per_feature: 15
-evaluator_pass_score: 8.0
-
-evaluator_weights:
-  design_quality: 0.30
-  originality: 0.30
-  craft: 0.25
-  functionality: 0.15
-
-# ── Context management ───────────────────────────────────────────────────────
-context_reset_threshold_tokens: 150000
-sprint_contract_enabled: true
-
-# ── Terminal progress animation ──────────────────────────────────────────────
-progress_animation: "sparkle"       # sparkle | bloom | snow | braille | orbit | pulse | dots | moon | bars | clock | wave | tech
-progress_phrase_style: "playful"    # playful | steady
-progress_text_effect: "typewriter"  # none | typewriter | scramble
+```json
+{
+  "project_name": "my-web-app",
+  "project_id": "a3f8c21b",
+  "brief": "A task management web app with projects, tasks, due dates, priorities, completion, and a Kanban board.",
+  "output_dir": "./output/web_app_a3f8c21b",
+  "orchestration_mode": "runner",
+  "code_runner": "subprocess",
+  "code_runner_model": null,
+  "codex_oss": false,
+  "codex_local_provider": null,
+  "code_runner_extra_args": [],
+  "openai_api_key": null,
+  "gemini_api_key": null,
+  "openrouter_api_key": null,
+  "planner_model": "claude-opus-4-7",
+  "generator_model": "claude-opus-4-7",
+  "evaluator_model": "claude-opus-4-7",
+  "max_iterations_per_feature": 15,
+  "evaluator_pass_score": 8.0,
+  "evaluator_weights": {
+    "design_quality": 0.30,
+    "originality": 0.30,
+    "craft": 0.25,
+    "functionality": 0.15
+  },
+  "context_reset_threshold_tokens": 150000,
+  "sprint_contract_enabled": true,
+  "progress_animation": "sparkle",
+  "progress_phrase_style": "playful",
+  "progress_text_effect": "typewriter"
+}
 ```
 
 ---

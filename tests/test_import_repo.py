@@ -11,11 +11,18 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import yaml
 from click.testing import CliRunner
 
 from cli import main
-from harness.import_repo import detect_stage, EntryPhase
+from harness.config import CONFIG_FILENAME
+from harness.import_repo import (
+    EntryPhase,
+    RepoSpecAssessment,
+    assess_repo_spec_with_agent,
+    detect_stage,
+    parse_repo_spec_assessment,
+)
+from harness.runners.base import RunResult
 
 
 # ── Stage detection: pure function ───────────────────────────────────────────
@@ -25,8 +32,8 @@ class TestDetectStage:
         report = detect_stage(tmp_path)
         assert report.entry_phase == EntryPhase.EMPTY
 
-    def test_config_yaml_means_harness_project(self, tmp_path):
-        (tmp_path / "config.yaml").write_text("project_name: x\nbrief: y\n")
+    def test_harness_config_means_harness_project(self, tmp_path):
+        (tmp_path / CONFIG_FILENAME).write_text('{"project_name": "x", "brief": "y"}\n')
         report = detect_stage(tmp_path)
         assert report.entry_phase == EntryPhase.HARNESS_PROJECT
 
@@ -39,10 +46,10 @@ class TestDetectStage:
         assert report.entry_phase == EntryPhase.HAS_FEATURES
         assert report.feature_count == 1
 
-    def test_spec_only_means_has_spec(self, tmp_path):
+    def test_spec_only_is_not_treated_as_harness_stage(self, tmp_path):
         (tmp_path / "spec.md").write_text("# Spec\nbody")
         report = detect_stage(tmp_path)
-        assert report.entry_phase == EntryPhase.HAS_SPEC
+        assert report.entry_phase == EntryPhase.EMPTY
 
     def test_high_pass_rate_triggers_review_ready(self, tmp_path):
         feats = [
@@ -58,7 +65,7 @@ class TestDetectStage:
         assert report.feature_pass_rate == 0.9
 
     def test_harness_project_with_high_pass_promotes_to_review(self, tmp_path):
-        (tmp_path / "config.yaml").write_text("project_name: x\nbrief: y\n")
+        (tmp_path / CONFIG_FILENAME).write_text('{"project_name": "x", "brief": "y"}\n')
         feats = [
             {"id": f"f{i}", "name": "x", "description": "y", "priority": i,
              "status": "passing"} for i in range(10)
@@ -129,6 +136,59 @@ class TestDetectStage:
         assert "badge.svg" not in report.suggested_brief
 
 
+# ── Agent-assisted spec assessment ───────────────────────────────────────────
+
+def test_parse_repo_spec_assessment_tagged_json():
+    assessment = parse_repo_spec_assessment(
+        """
+        <harness_import_assessment>
+        {
+          "has_spec": true,
+          "confidence": 0.88,
+          "reason": "README and docs describe behavior",
+          "suggested_brief": "A focused planning app.",
+          "spec_markdown": "# Product Specification\\n\\n## Scope\\nDo the thing."
+        }
+        </harness_import_assessment>
+        """
+    )
+    assert assessment.has_spec is True
+    assert assessment.confidence == pytest.approx(0.88)
+    assert "Product Specification" in assessment.spec_markdown
+    assert "planning app" in assessment.suggested_brief
+
+
+def test_assess_repo_spec_with_agent_invokes_runner(tmp_path):
+    captured = {}
+
+    class FakeRunner:
+        def implement(self, prompt, cwd, timeout_seconds=600):
+            captured["prompt"] = prompt
+            captured["cwd"] = cwd
+            captured["timeout"] = timeout_seconds
+            return RunResult(
+                output=(
+                    '<harness_import_assessment>{"has_spec": false, '
+                    '"confidence": 0.2, "reason": "notes only", '
+                    '"suggested_brief": "A notes app.", "spec_markdown": ""}'
+                    "</harness_import_assessment>"
+                ),
+                success=True,
+            )
+
+    assessment = assess_repo_spec_with_agent(
+        FakeRunner(),
+        tmp_path,
+        suggested_brief="maybe a notes app",
+        timeout_seconds=123,
+    )
+    assert assessment.has_spec is False
+    assert assessment.reason == "notes only"
+    assert captured["cwd"] == str(tmp_path)
+    assert captured["timeout"] == 123
+    assert "maybe a notes app" in captured["prompt"]
+
+
 # ── CLI: `harness import` ────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -141,7 +201,7 @@ def _prep_review_ready_repo(d: Path) -> None:
         {"id": f"f{i}", "name": "x", "description": "y", "priority": i,
          "status": "passing"} for i in range(10)
     ]
-    (d / "config.yaml").write_text(yaml.safe_dump({
+    (d / CONFIG_FILENAME).write_text(json.dumps({
         "project_name": "Done", "project_id": "doneproj", "brief": "b",
         "output_dir": str(d), "orchestration_mode": "runner",
         "code_runner": "subprocess",
@@ -149,6 +209,14 @@ def _prep_review_ready_repo(d: Path) -> None:
     (d / "features.json").write_text(json.dumps({
         "project_name": "Done", "brief": "b", "features": feats,
     }))
+
+
+def _stub_no_spec_assessment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "harness.import_repo.assess_repo_spec_with_agent",
+        lambda *a, **k: RepoSpecAssessment(reason="test stub"),
+    )
+    monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: MagicMock())
 
 
 def test_import_review_ready_routes_to_review_only(runner, tmp_path, monkeypatch):
@@ -234,6 +302,7 @@ def test_import_copy_mode_creates_output_dir(runner, tmp_path, monkeypatch):
         def run(self, **k): pass
 
     monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
         "import", str(src), "-r", "subprocess",
@@ -247,7 +316,80 @@ def test_import_copy_mode_creates_output_dir(runner, tmp_path, monkeypatch):
     assert len(children) == 1
     copied = children[0]
     assert (copied / "thing.py").exists(), "copied source file missing"
-    assert (copied / "config.yaml").exists(), "config.yaml not written into copy"
+    assert (copied / CONFIG_FILENAME).exists(), f"{CONFIG_FILENAME} not written into copy"
+
+
+def test_import_copy_mode_rehomes_existing_harness_config(runner, tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / CONFIG_FILENAME).write_text(json.dumps({
+        "project_name": "Existing",
+        "project_id": "oldid",
+        "brief": "b",
+        "output_dir": str(src),
+        "orchestration_mode": "runner",
+        "code_runner": "subprocess",
+    }))
+
+    captured = {}
+
+    class FakeOrch:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+        def run(self, **k): pass
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    _stub_no_spec_assessment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(main, [
+        "import", str(src), "-r", "subprocess", "--no-review",
+    ])
+    assert result.exit_code == 0, result.output
+    copied = next((tmp_path / "output").iterdir())
+    assert Path(captured["config"].output_dir).resolve() == copied.resolve()
+    assert captured["config"].project_id != "oldid"
+
+
+def test_import_agent_spec_written_before_orchestrator(runner, tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "README.md").write_text("# App\n\nA useful app.")
+    (src / "app.py").write_text("print('hi')\n")
+
+    captured = {}
+
+    class FakeOrch:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+        def run(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+    class FakeRunner:
+        def implement(self, *a, **k):
+            return RunResult(
+                output=(
+                    '<harness_import_assessment>{"has_spec": true, '
+                    '"confidence": 0.9, "reason": "README has scope", '
+                    '"suggested_brief": "A useful app.", '
+                    '"spec_markdown": "# Product Specification\\n\\nUsefully app."}'
+                    "</harness_import_assessment>"
+                ),
+                success=True,
+            )
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: FakeRunner())
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(main, [
+        "import", str(src), "-r", "subprocess", "--brief", "fallback",
+    ])
+    assert result.exit_code == 0, result.output
+    spec_path = captured["config"].spec_path
+    assert spec_path.exists()
+    assert "Product Specification" in spec_path.read_text()
+    assert captured["kwargs"]["confirmed_spec"] == spec_path.read_text()
 
 
 def test_import_in_place_mode_does_not_create_output_dir(runner, tmp_path, monkeypatch):
@@ -261,6 +403,7 @@ def test_import_in_place_mode_does_not_create_output_dir(runner, tmp_path, monke
         def run(self, **k): pass
 
     monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
         "import", str(src), "--in-place", "-r", "subprocess",
@@ -269,7 +412,7 @@ def test_import_in_place_mode_does_not_create_output_dir(runner, tmp_path, monke
     assert result.exit_code == 0, result.output
     assert not (tmp_path / "output").exists()
     # Config written INTO source
-    assert (src / "config.yaml").exists()
+    assert (src / CONFIG_FILENAME).exists()
 
 
 def test_import_refuses_to_overwrite_existing_output(runner, tmp_path, monkeypatch):
@@ -282,6 +425,7 @@ def test_import_refuses_to_overwrite_existing_output(runner, tmp_path, monkeypat
         def run(self, **k): pass
 
     monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     # Pre-create the destination
     expected_slug = "src"  # source directory is "src", project_name derives from it

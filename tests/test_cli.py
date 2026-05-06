@@ -21,6 +21,7 @@ from click.testing import CliRunner
 
 import cli
 from cli import main
+from harness.config import CONFIG_FILENAME
 from harness.runners.base import PreflightResult, RunResult
 
 
@@ -101,7 +102,7 @@ def test_new_persists_agentic_coding_model(runner, tmp_path, monkeypatch):
     assert captured["config"].code_runner == "codex"
     assert captured["config"].code_runner_model == "gpt-5.2"
 
-    config_files = list((tmp_path / "output").glob("*/config.yaml"))
+    config_files = list((tmp_path / "output").glob(f"*/{CONFIG_FILENAME}"))
     assert len(config_files) == 1
     saved = yaml.safe_load(config_files[0].read_text())
     assert saved["code_runner_model"] == "gpt-5.2"
@@ -179,11 +180,11 @@ def test_animation_theme_rejects_api_runner(runner):
 
 # ── `harness resume` ─────────────────────────────────────────────────────────
 
-def test_resume_missing_config_yaml(runner, tmp_path):
-    """Resume on a directory without config.yaml fails clearly."""
+def test_resume_missing_config_file(runner, tmp_path):
+    """Resume on a directory without harness_config.json fails clearly."""
     result = runner.invoke(main, ["resume", str(tmp_path)])
     assert result.exit_code == 1
-    assert "config.yaml" in result.output
+    assert CONFIG_FILENAME in result.output
 
 
 def test_resume_missing_directory(runner):
@@ -193,7 +194,7 @@ def test_resume_missing_directory(runner):
 
 
 def test_resume_loads_config_and_invokes_orchestrator(runner, tmp_path, monkeypatch):
-    """Resume reads config.yaml and hands off to Orchestrator.run() — no other side effects."""
+    """Resume reads harness_config.json and hands off to Orchestrator.run()."""
     # Build a valid project layout
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -205,7 +206,7 @@ def test_resume_loads_config_and_invokes_orchestrator(runner, tmp_path, monkeypa
         "orchestration_mode": "runner",
         "code_runner": "subprocess",
     }
-    (project_dir / "config.yaml").write_text(yaml.safe_dump(config))
+    (project_dir / CONFIG_FILENAME).write_text(json.dumps(config))
 
     captured = {}
 
@@ -242,7 +243,7 @@ def test_resume_bare_list_features_shown_as_normalize_pending(
         "orchestration_mode": "runner",
         "code_runner": "subprocess",
     }
-    (project_dir / "config.yaml").write_text(yaml.safe_dump(config))
+    (project_dir / CONFIG_FILENAME).write_text(json.dumps(config))
     # Bare-list shape — what an agentic runner would have written
     bare = [{"id": f"f{i}", "name": f"F{i}", "description": "x", "priority": i}
             for i in range(120)]
@@ -283,7 +284,7 @@ def test_resume_skips_re_init_when_features_already_present(runner, tmp_path, mo
         orchestration_mode="runner",
         code_runner="subprocess",
     )
-    config.save_yaml(project_dir / "config.yaml")
+    config.save_yaml(project_dir / CONFIG_FILENAME)
 
     # Pre-populate features.json + spec.md as if a prior session ran
     progress = ProjectProgress(
@@ -302,9 +303,9 @@ def test_resume_skips_re_init_when_features_already_present(runner, tmp_path, mo
     real_plan = Orchestrator._plan
     real_loop = Orchestrator._feature_loop
 
-    def fake_init(self):
+    def fake_init(self, *a, **k):
         calls.append("init")
-        return real_init(self)
+        return real_init(self, *a, **k)
     def fake_plan(self, progress, confirmed_spec=None):
         calls.append("plan")
         return real_plan(self, progress, confirmed_spec)

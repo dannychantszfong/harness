@@ -34,7 +34,7 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 
 ### Should Have (P1)
 - Interactive runner selection at startup with clear billing/capability comparison
-- Runner specified in YAML config or CLI flag (skip interactive prompt)
+- Runner specified in `harness_config.json` or CLI flag (skip interactive prompt)
 - Sprint contract negotiation before each feature implementation
 - Git commit per passing feature as a recovery point
 - Six supported billing/auth modes: Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API — all routed through the two coding agents
@@ -95,7 +95,7 @@ API providers (Anthropic, OpenAI, Gemini, OpenRouter) are not standalone runners
 
 **Acceptance criteria:**
 - `--runner subprocess` CLI flag overrides everything
-- `code_runner: subprocess` in YAML config skips the interactive prompt
+- `"code_runner": "subprocess"` in `harness_config.json` skips the interactive prompt
 - If neither is set, an interactive prompt with a formatted table is shown at startup
 - Selected runner is printed to console before the harness begins
 
@@ -134,7 +134,7 @@ The harness supports six combinations of coding agent and billing/auth source. M
 
 **Acceptance criteria:**
 - Switching modes requires no code changes — just env var changes
-- The harness does not auto-export env vars from `config.yaml`; users set them in their shell, `direnv`, or `.env`
+- The harness does not auto-export env vars from `harness_config.json`; users set them in their shell, `direnv`, or `.env`
 - A subscription rate-limit hit (Modes 1, 3) is detected, surfaced with a friendly panel, and (by default) auto-resumed via launchd at the reset time
 
 ---
@@ -158,12 +158,12 @@ The harness supports six combinations of coding agent and billing/auth source. M
 
 | Command | Description |
 |---------|-------------|
-| `harness run config.yaml` | Full end-to-end run (prompts for runner if not configured) |
-| `harness run config.yaml --runner subprocess` | Run with specific runner (no prompt) |
+| `harness run harness_config.json` | Full end-to-end run (prompts for runner if not configured) |
+| `harness run harness_config.json --runner subprocess` | Run with specific runner (no prompt) |
 | `harness runners` | List all runners with billing/requirements table |
-| `harness status config.yaml` | Print progress (no API calls) |
-| `harness init config.yaml "brief"` | Initialize only |
-| `harness plan config.yaml` | Run planner only |
+| `harness status harness_config.json` | Print progress (no API calls) |
+| `harness init harness_config.json "brief"` | Initialize only |
+| `harness plan harness_config.json` | Run planner only |
 
 ---
 

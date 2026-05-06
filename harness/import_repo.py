@@ -5,30 +5,33 @@ and figure out where to plug it into the pipeline:
 
   HARNESS_PROJECT  → existing harness output; just call harness resume
   HAS_FEATURES     → features.json present; init phase will normalize, then loop
-  HAS_SPEC         → spec.md exists, no features.json yet; skip planner alignment,
-                     run initializer to decompose
   HAS_CODE         → has README/source but no harness artifacts; need brief +
                      planner alignment + init + loop
   EMPTY            → like `harness new` from scratch
   REVIEW_READY     → looks done (high feature pass rate, or substantial
                      code+tests+docs) → run ReviewerAgent only
 
-The detector is pure: it reads file metadata only, never executes code.
+The detector is pure: it reads file metadata only, never executes code. Whether
+an arbitrary repo already contains a usable spec is assessed separately by the
+selected coding agent during `harness import`.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from harness.config import CONFIG_FILENAME
+from harness.runners.base import CodeRunner, RunnerRateLimitedError
+
 
 class EntryPhase(str, Enum):
-    HARNESS_PROJECT = "harness_project"   # config.yaml present → harness resume
+    HARNESS_PROJECT = "harness_project"   # harness_config.json present → resume
     HAS_FEATURES = "has_features"          # features.json present, no config
-    HAS_SPEC = "has_spec"                  # spec.md present, no features.json
     HAS_CODE = "has_code"                  # README/source, no harness artifacts
     EMPTY = "empty"                        # nothing meaningful → like harness new
     REVIEW_READY = "review_ready"          # looks finished → ReviewerAgent only
@@ -64,13 +67,22 @@ class StageReport:
     has_readme: bool = False
 
 
+@dataclass
+class RepoSpecAssessment:
+    """Agent judgment about whether an imported repo already has a spec."""
+    has_spec: bool = False
+    spec_markdown: Optional[str] = None
+    suggested_brief: Optional[str] = None
+    confidence: float = 0.0
+    reason: str = ""
+
+
 def detect_stage(
     project_dir: Path,
     *,
     review_pass_threshold: float = 0.8,
-    config_filename: str = "config.yaml",
+    config_filename: str = CONFIG_FILENAME,
     features_filename: str = "features.json",
-    spec_filename: str = "spec.md",
 ) -> StageReport:
     """Probe the directory and decide where to enter the pipeline.
 
@@ -84,7 +96,6 @@ def detect_stage(
 
     config_path = project_dir / config_filename
     features_path = project_dir / features_filename
-    spec_path = project_dir / spec_filename
     readme_path = _find_readme(project_dir)
 
     report.has_readme = readme_path is not None
@@ -118,13 +129,6 @@ def detect_stage(
         if report.feature_pass_rate >= review_pass_threshold and report.feature_count > 0:
             report.entry_phase = EntryPhase.REVIEW_READY
             report.reasons.append("→ review-ready (pass-rate threshold)")
-        return report
-
-    if spec_path.exists():
-        report.entry_phase = EntryPhase.HAS_SPEC
-        report.reasons.append(f"{spec_filename} present, no features yet → init only")
-        if readme_path:
-            report.suggested_name = _slug_to_name(project_dir.name)
         return report
 
     # No harness artifacts — judge by the actual code state.
@@ -251,3 +255,85 @@ def _read_brief_from_readme(readme_path: Path, max_chars: int = 500) -> Optional
 
 def _slug_to_name(slug: str) -> str:
     return " ".join(part.capitalize() for part in slug.replace("_", "-").split("-")) or slug
+
+
+def assess_repo_spec_with_agent(
+    runner: CodeRunner,
+    project_dir: Path,
+    *,
+    suggested_brief: str | None = None,
+    timeout_seconds: int = 600,
+) -> RepoSpecAssessment:
+    """Ask the coding agent whether the imported repo already contains a spec."""
+    prompt = _build_spec_assessment_prompt(suggested_brief=suggested_brief)
+    result = runner.implement(prompt, cwd=str(project_dir), timeout_seconds=timeout_seconds)
+    if not result.success:
+        if result.rate_limit_reset_at is not None:
+            raise RunnerRateLimitedError(
+                reset_at=result.rate_limit_reset_at,
+                raw_message=result.error or "",
+            )
+        return RepoSpecAssessment(reason=result.error or "repo assessment runner failed")
+    return parse_repo_spec_assessment(result.output)
+
+
+def parse_repo_spec_assessment(output: str) -> RepoSpecAssessment:
+    """Parse the agent's tagged JSON response."""
+    m = re.search(
+        r"<harness_import_assessment>\s*(.*?)\s*</harness_import_assessment>",
+        output,
+        re.DOTALL,
+    )
+    payload = m.group(1) if m else output
+    try:
+        data = json.loads(payload.strip())
+    except Exception:
+        return RepoSpecAssessment(reason="Could not parse repo assessment JSON.")
+
+    spec = data.get("spec_markdown")
+    suggested = data.get("suggested_brief")
+    return RepoSpecAssessment(
+        has_spec=bool(data.get("has_spec") and isinstance(spec, str) and spec.strip()),
+        spec_markdown=spec.strip() if isinstance(spec, str) and spec.strip() else None,
+        suggested_brief=suggested.strip() if isinstance(suggested, str) and suggested.strip() else None,
+        confidence=float(data.get("confidence") or 0.0),
+        reason=str(data.get("reason") or ""),
+    )
+
+
+def _build_spec_assessment_prompt(suggested_brief: str | None = None) -> str:
+    brief_hint = suggested_brief or "(none)"
+    return f"""You are helping Agent Harness import an existing local repository.
+
+Inspect the repository in the current working directory. Decide whether the repo
+already contains enough product/specification material for Harness to skip
+drafting a new product spec. Do not execute project code, install dependencies,
+or modify files. Read docs, README, planning notes, and source structure as
+needed.
+
+A repo "has a spec" when it contains a durable description of intended product
+behavior, scope, user workflows, acceptance criteria, or feature requirements.
+It does not need to be named spec.md.
+
+Suggested brief from heuristic README extraction:
+{brief_hint}
+
+Return only JSON wrapped in this exact tag:
+
+<harness_import_assessment>
+{{
+  "has_spec": true,
+  "confidence": 0.0,
+  "reason": "short reason",
+  "suggested_brief": "one short project brief",
+  "spec_markdown": "# Product Specification\\n\\n..."
+}}
+</harness_import_assessment>
+
+Rules:
+- If the repo has scattered but usable spec material, synthesize it into
+  spec_markdown with citations to source file paths.
+- If it does not have a usable spec, set has_spec false and spec_markdown "".
+- Keep spec_markdown product-focused: behavior, scope, flows, success criteria.
+- Do not include implementation plans unless the repo's spec explicitly requires them.
+"""

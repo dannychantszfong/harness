@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from harness import auto_resume
-from harness.config import HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.orchestrator import Orchestrator
 from harness.runners.base import (
     PreflightResult, RunnerRateLimitedError, RunResult, RunnerType,
@@ -111,7 +111,7 @@ def test_orchestrator_catches_rate_limit_and_schedules(tmp_path, monkeypatch):
         orchestration_mode="runner", code_runner="subprocess",
         auto_resume_on_rate_limit=True,
     )
-    cfg.save_yaml(project_dir / "config.yaml")
+    cfg.save_yaml(project_dir / CONFIG_FILENAME)
 
     fake_runner = MagicMock()
     fake_runner.preflight.return_value = PreflightResult(
@@ -155,7 +155,7 @@ def test_auto_resume_disabled_skips_scheduling(tmp_path, monkeypatch):
         orchestration_mode="runner", code_runner="subprocess",
         auto_resume_on_rate_limit=False,
     )
-    cfg.save_yaml(project_dir / "config.yaml")
+    cfg.save_yaml(project_dir / CONFIG_FILENAME)
 
     fake_runner = MagicMock()
     fake_runner.preflight.return_value = PreflightResult(

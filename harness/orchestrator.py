@@ -22,7 +22,7 @@ from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
 
-from harness.config import HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.agents import InitializerAgent, PlannerAgent, GeneratorAgent, EvaluatorAgent
 from harness.runners import create_runner, RunnerType
 from harness.runners.base import RunnerRateLimitedError
@@ -39,7 +39,7 @@ console = Console()
 class Orchestrator:
     """Drives the full harness lifecycle for a project."""
 
-    # Fields that are safe to live-reload from config.yaml between seams.
+    # Fields that are safe to live-reload from harness_config.json between seams.
     # Identity fields (project_id, output_dir, code_runner, orchestration_mode)
     # are intentionally pinned — changing them mid-run would invalidate the
     # runner instance and progress files.
@@ -68,8 +68,8 @@ class Orchestrator:
         self.session_opener = SessionOpener(config)
         self.total_tokens = 0
         self.session_number = 1
-        # Track config.yaml mtime so we can pick up edits between seams.
-        self._config_path = Path(config.output_dir) / "config.yaml"
+        # Track harness_config.json mtime so we can pick up edits between seams.
+        self._config_path = HarnessConfig.default_config_path(config.output_dir)
         self._config_mtime = (
             self._config_path.stat().st_mtime if self._config_path.exists() else 0.0
         )
@@ -115,7 +115,7 @@ class Orchestrator:
 
         try:
             # Phase 1: Initialize (idempotent — skips if already done)
-            progress = self._initialize()
+            progress = self._initialize(confirmed_spec=confirmed_spec)
 
             # Phase 2: Plan (skip if a confirmed spec was supplied)
             progress = self._plan(progress, confirmed_spec=confirmed_spec)
@@ -220,10 +220,10 @@ class Orchestrator:
         """
         return self.runner if self.config.orchestration_mode == "runner" else None
 
-    def _initialize(self) -> ProjectProgress:
+    def _initialize(self, confirmed_spec: str | None = None) -> ProjectProgress:
         console.print("\n[bold blue]Phase 1: Initialize[/bold blue]")
         agent = InitializerAgent(self.config, runner=self._agent_runner())
-        return agent.run(brief=self.config.brief)
+        return agent.run(brief=self.config.brief, spec=confirmed_spec)
 
     def _plan(
         self,
@@ -399,7 +399,7 @@ class Orchestrator:
         self.total_tokens += tokens
 
     def _reload_config_if_changed(self) -> dict[str, tuple]:
-        """Re-read config.yaml and apply mutable field changes in place.
+        """Re-read harness_config.json and apply mutable field changes in place.
 
         Agents read self.config.<role>_model as a live property each call,
         so mutating self.config is enough — no need to reconstruct agents.
@@ -422,7 +422,7 @@ class Orchestrator:
             fresh = HarnessConfig.from_yaml(self._config_path)
         except Exception as e:
             console.print(
-                f"[yellow]config.yaml changed but failed to parse ({e}); "
+                f"[yellow]{CONFIG_FILENAME} changed but failed to parse ({e}); "
                 "keeping current values.[/yellow]"
             )
             return {}
@@ -436,7 +436,7 @@ class Orchestrator:
                 changes[field] = (old, new)
 
         if changes:
-            lines = ["[cyan]config.yaml changed — applying live:[/cyan]"]
+            lines = [f"[cyan]{CONFIG_FILENAME} changed — applying live:[/cyan]"]
             for field, (old, new) in changes.items():
                 lines.append(f"  [dim]{field}:[/dim] {old} → [bold]{new}[/bold]")
             console.print("\n".join(lines))

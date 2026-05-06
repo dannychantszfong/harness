@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from pathlib import Path
 
-from harness.config import HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.orchestrator import Orchestrator
 from harness.progress.tracker import ProgressTracker
 from harness.runners.base import RunnerType
@@ -293,7 +293,7 @@ def _runner_flags(f):
 @_runner_flags
 def new(runner: str | None, with_api: bool, model: str | None,
         claude_code: bool, claude_sdk: bool, codex: bool):
-    """Create a new project interactively — no YAML needed.
+    """Create a new project interactively — no config editing needed.
 
     Pick your runner via a named flag, or leave all flags off to get an
     interactive menu.
@@ -387,7 +387,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
     console.print(f"[dim]Spec saved to {spec_path}[/dim]")
 
     # ── Step 9: Save config alongside the project ─────────────────────────
-    config_path = output_dir / "config.yaml"
+    config_path = HarnessConfig.default_config_path(output_dir)
     config.save_yaml(config_path)
     console.print(f"[dim]Config saved to {config_path}[/dim]\n")
 
@@ -409,7 +409,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
     help="Override the coding-agent model for this run only.",
 )
 def run(config_file: str, runner: str | None, model: str | None):
-    """Run the full harness for a project defined in CONFIG_FILE (YAML)."""
+    """Run the full harness for a project defined in CONFIG_FILE."""
     config = HarnessConfig.from_yaml(config_file)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
 
@@ -433,7 +433,7 @@ def run(config_file: str, runner: str | None, model: str | None):
     "--runner", "-r",
     type=click.Choice([r[0] for r in _RUNNER_TABLE], case_sensitive=False),
     default=None,
-    help="Override the runner saved in config.yaml (rarely needed).",
+    help=f"Override the runner saved in {CONFIG_FILENAME} (rarely needed).",
 )
 @click.option(
     "--model", "model", default=None,
@@ -442,7 +442,7 @@ def run(config_file: str, runner: str | None, model: str | None):
 def resume(project_dir: str, runner: str | None, model: str | None):
     """Resume work on an existing project.
 
-    Pass the project's output directory (the one containing config.yaml).
+    Pass the project's output directory (the one containing harness_config.json).
     The harness picks up wherever it left off:
 
       • initialize step skips if features.json already exists
@@ -450,11 +450,11 @@ def resume(project_dir: str, runner: str | None, model: str | None):
       • feature loop continues from the next pending feature
     """
     project_path = Path(project_dir)
-    config_path = project_path / "config.yaml"
+    config_path = HarnessConfig.default_config_path(project_path)
     if not config_path.exists():
         console.print(
-            f"[red]No config.yaml found in {project_dir}.[/red]\n"
-            f"[dim]A resumable project should contain config.yaml at its root.[/dim]"
+            f"[red]No {CONFIG_FILENAME} found in {project_dir}.[/red]\n"
+            f"[dim]A resumable project should contain {CONFIG_FILENAME} at its root.[/dim]"
         )
         raise SystemExit(1)
 
@@ -574,11 +574,17 @@ def import_repo(
     """
     import shutil
     import uuid
-    from harness.import_repo import detect_stage, EntryPhase
+    from harness.import_repo import (
+        EntryPhase,
+        assess_repo_spec_with_agent,
+        detect_stage,
+    )
+    from harness.runners.base import RunnerRateLimitedError
 
     source = Path(source_path).resolve()
     project_name = name or _slug_to_title(source.name)
     project_id = uuid.uuid4().hex[:8]
+    brief_was_provided = brief is not None
 
     # ── Step 1: Detect stage on the SOURCE first (so we can show it) ──────
     src_report = detect_stage(source, review_pass_threshold=review_threshold)
@@ -610,14 +616,16 @@ def import_repo(
     orchestration_mode = _default_orchestration_mode(runner_type)
     _require_anthropic_key_for_api_mode(orchestration_mode)
 
-    # ── Step 4: If config.yaml already exists in working dir, just resume ─
-    cfg_path = output_dir / "config.yaml"
+    # ── Step 4: If harness_config.json already exists, use that Harness state ─
+    cfg_path = HarnessConfig.default_config_path(output_dir)
     if cfg_path.exists() and not in_place:
-        # Copied harness project — fall through to resume semantics
         config = HarnessConfig.from_yaml(cfg_path)
+        config.output_dir = str(output_dir)
+        config.project_id = project_id
+        config.save_yaml(cfg_path)
     elif cfg_path.exists() and in_place:
         config = HarnessConfig.from_yaml(cfg_path)
-        console.print(f"[dim]Existing config.yaml found — using it.[/dim]")
+        console.print(f"[dim]Existing {CONFIG_FILENAME} found — using it.[/dim]")
     else:
         # Resolve brief
         if brief is None and src_report.suggested_brief:
@@ -659,6 +667,44 @@ def import_repo(
             if review_only else "auto: needs build/init"
         )
 
+    confirmed_spec = None
+    if not review_only and not config.features_path.exists():
+        from harness.runners import create_runner
+
+        console.print("[dim]Asking the runner to inspect the repo for existing spec material...[/dim]")
+        assessment_runner = create_runner(runner_type, config)
+        try:
+            assessment = assess_repo_spec_with_agent(
+                assessment_runner,
+                output_dir,
+                suggested_brief=work_report.suggested_brief or config.brief,
+            )
+        except RunnerRateLimitedError as exc:
+            Orchestrator(config, runner_type=runner_type)._handle_rate_limit(exc)
+            return
+
+        if assessment.suggested_brief and not brief_was_provided:
+            config.brief = assessment.suggested_brief
+            config.save_yaml(cfg_path)
+        if assessment.has_spec and assessment.spec_markdown:
+            confirmed_spec = assessment.spec_markdown
+            config.spec_path.write_text(confirmed_spec)
+            console.print(
+                Panel(
+                    f"[bold]Existing spec found by agent.[/bold]\n"
+                    f"Confidence: {assessment.confidence:.2f}\n"
+                    f"Reason: {assessment.reason or 'not provided'}\n\n"
+                    f"Normalized spec written to {config.spec_path}",
+                    title="[green]Import spec[/green]",
+                    border_style="green",
+                )
+            )
+        else:
+            console.print(
+                f"[dim]No reusable repo spec found by agent"
+                f"{f' ({assessment.reason})' if assessment.reason else ''}.[/dim]"
+            )
+
     console.print(Panel(
         f"[bold]Mode:[/bold] {'[green]review-only[/green]' if review_only else '[cyan]build[/cyan]'} "
         f"[dim]({reason})[/dim]\n"
@@ -669,7 +715,7 @@ def import_repo(
     ))
 
     orchestrator = Orchestrator(config, runner_type=runner_type)
-    orchestrator.run(review_only=review_only)
+    orchestrator.run(review_only=review_only, confirmed_spec=confirmed_spec)
 
 
 def _slug_to_title(slug: str) -> str:

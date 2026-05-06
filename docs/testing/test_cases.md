@@ -241,14 +241,13 @@ def test_sprint_contract_uses_api_not_runner(tmp_config, one_feature_progress):
 Before each release, verify:
 
 - [ ] `harness runners` prints the three coding-agent rows without error
-- [ ] `harness run config.yaml --runner subprocess` skips the prompt
+- [ ] `harness run harness_config.json --runner subprocess` skips the prompt
 - [ ] Mode 6 (OpenRouter via Claude Code) works with `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`
 - [ ] Missing binary for any of the three runners shows clear install instructions
 - [ ] Missing env var for the chosen mode shows actionable guidance
-- [ ] `code_runner: sdk` in YAML skips the interactive prompt
+- [ ] `"code_runner": "sdk"` in `harness_config.json` skips the interactive prompt
 - [ ] Subscription rate-limit hit surfaces the friendly panel (no traceback)
 - [ ] `auto_resume_on_rate_limit: true` (default) writes a launchd plist
-- [ ] Old configs with `code_runner: anthropic|openai|gemini|openrouter` raise the migration error in INC-06
 - [ ] `harness import <repo>` correctly detects stage and routes to review-only when ≥80% features pass
 - [ ] Switching runner mid-project (config change) resumes from last state
 - [ ] `ANTHROPIC_API_KEY` is required for api orchestration, but not runner orchestration

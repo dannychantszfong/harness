@@ -34,7 +34,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 | File | Description |
 |------|-------------|
 | [architecture.md](technical/architecture.md) | 6-layer breakdown, runner families, agent roles, data model |
-| [api_reference.md](technical/api_reference.md) | CLI commands, Python API, YAML config reference, env vars |
+| [api_reference.md](technical/api_reference.md) | CLI commands, Python API, JSON config reference, env vars |
 | [ADR.md](technical/ADR.md) | 10 Architecture Decision Records (ADR-007–010 cover v2 runner design) |
 
 ---
@@ -65,7 +65,7 @@ pip install -e ".[all-providers]"
 harness runners                              # see all options
 harness new --claude-code --model sonnet     # Claude Code frame, chosen engine
 harness new --codex --model gpt-5.2          # Codex frame, chosen engine
-harness run examples/web_app.yaml -r sdk     # run existing config
+harness run output/web_app_a3f8c21b/harness_config.json -r sdk
 ```
 
 ---

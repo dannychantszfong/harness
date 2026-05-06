@@ -18,7 +18,7 @@ Built around **2 coding agents** (Claude Code and Codex) with **6 supported bill
 conda create -n harness python=3.12 -y && conda activate harness
 pip install -e ".[all-providers]"
 
-# 2. Start a new project — interactive, no YAML needed
+# 2. Start a new project — interactive, no config editing needed
 harness new --claude-code        # Claude Code (subscription by default)
 harness new --claude-sdk         # Claude Code via SDK (structured output)
 harness new --claude-code --model sonnet
@@ -32,7 +32,7 @@ harness import ../my-other-repo  # detect stage, run from the right phase
 # 4. Other commands
 harness runners                  # list runners with requirements
 harness animation-theme "moonlit ritual" --runner codex
-harness status output/my_app_a3f8c21b/config.yaml
+harness status output/my_app_a3f8c21b/harness_config.json
 ```
 
 ---
@@ -45,7 +45,7 @@ harness new
   ├─ Prompts: project name, brief
   ├─ Requirement Alignment (planner ↔ user, back-and-forth until confirmed)
   ├─ Runner selection (flag / menu)
-  └─ Saves config to ./output/<slug>_<id>/config.yaml
+  └─ Saves config to ./output/<slug>_<id>/harness_config.json
         │
         ▼
 Phase 1 — Initializer
@@ -141,15 +141,17 @@ harness new --claude-sdk --model claude-sonnet-4-6
 harness new --codex --model gpt-5.2
 ```
 
-If you omit `--model`, `harness new` asks once during setup. Press Enter to use the runner's own default. The selected value is saved as `code_runner_model` in `config.yaml`.
+If you omit `--model`, `harness new` asks once during setup. Press Enter to use the runner's own default. The selected value is saved as `code_runner_model` in `harness_config.json`.
 
-Codex local/open-source routing can be configured in YAML:
+Codex local/open-source routing can be configured in `harness_config.json`:
 
-```yaml
-code_runner: "codex"
-code_runner_model: "qwen2.5-coder"
-codex_oss: true
-codex_local_provider: "ollama"   # or "lmstudio"
+```json
+{
+  "code_runner": "codex",
+  "code_runner_model": "qwen2.5-coder",
+  "codex_oss": true,
+  "codex_local_provider": "ollama"
+}
 ```
 
 ---
@@ -214,7 +216,7 @@ export HARNESS_NO_SPINNER=1
 
 ## Starting a New Project
 
-`harness new` replaces manual YAML editing with an interactive flow:
+`harness new` replaces manual config editing with an interactive flow:
 
 ```
 $ harness new --claude-code
@@ -248,7 +250,7 @@ Feedback (press Enter to confirm, or describe what to change): add dark mode sup
 Feedback (press Enter to confirm, or describe what to change): ↵
 ✓ Requirements confirmed.
 
-Config saved to ./output/my_todo_app_a3f8c21b/config.yaml
+Config saved to ./output/my_todo_app_a3f8c21b/harness_config.json
 ```
 
 The confirmed spec is injected directly into the orchestrator, skipping an extra planner API call.
@@ -258,10 +260,10 @@ The confirmed spec is injected directly into the orchestrator, skipping an extra
 ## Resuming a Project
 
 ```bash
-harness run output/my_todo_app_a3f8c21b/config.yaml
+harness run output/my_todo_app_a3f8c21b/harness_config.json
 
 # Override the runner (e.g. switch from SDK to subprocess)
-harness run output/my_todo_app_a3f8c21b/config.yaml --runner subprocess
+harness run output/my_todo_app_a3f8c21b/harness_config.json --runner subprocess
 ```
 
 The harness is fully restartable. It picks up from `features.json` — features already passing are skipped.
@@ -292,7 +294,7 @@ agent-harness/
 │   │   └── tracker.py           # Read/write features.json + progress.md
 │   ├── session/
 │   │   └── opener.py            # Session startup context builder
-│   ├── config.py                # HarnessConfig: YAML-backed, includes orchestration_mode
+│   ├── config.py                # HarnessConfig: JSON-backed, includes orchestration_mode
 │   └── orchestrator.py          # Main loop: phases, GAN loop, context resets, runner status
 ├── tests/
 │   ├── test_runners.py          # Runner factory + the three coding-agent runners
@@ -313,70 +315,40 @@ agent-harness/
 
 ## Configuration Reference
 
-Saved automatically to `output/<slug>_<id>/config.yaml` by `harness new`. You can also write it manually.
+Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`. You can also write it manually.
 
-```yaml
-project_name: "my-app"
-project_id: "a3f8c21b"          # auto-generated, used to name the output directory
-brief: "One to four sentences describing what to build."
-output_dir: "./output/my_app_a3f8c21b"
-
-# Orchestration mode:
-#   "runner" — planner + evaluator use the same runner (no API key for subscription runners)
-#   "api"    — planner + evaluator call Anthropic API directly (ANTHROPIC_API_KEY required)
-orchestration_mode: "runner"
-
-# Runner selection
-# Options: subprocess | sdk | codex
-# Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) plug into one
-# of these via env vars — they are not standalone runners.
-code_runner: "subprocess"
-
-# Coding-agent runtime model.
-# For Claude Code / Codex, this is passed to the agent CLI as --model.
-# Leave null to use the selected runtime's default model.
-code_runner_model: "sonnet"
-
-# Codex local/open-source routing
-codex_oss: false
-codex_local_provider: null       # ollama | lmstudio
-code_runner_extra_args: []       # advanced CLI escape hatch
-
-# Terminal progress animation for quiet waits
-progress_animation: "sparkle"    # sparkle | bloom | snow | braille | orbit | pulse | dots | moon | bars | clock | wave | tech
-progress_phrase_style: "playful" # playful | steady
-progress_text_effect: "typewriter" # none | typewriter | scramble
-
-# API-provider keys. NOT used to spawn separate runners — these are for
-# documenting what a project expects. Set the matching env vars in your
-# shell so Claude Code / Codex pick them up:
-#   ANTHROPIC_API_KEY      → Claude Code / SDK
-#   OPENAI_API_KEY         → Codex
-#   ANTHROPIC_BASE_URL +
-#   ANTHROPIC_AUTH_TOKEN   → Claude Code via OpenRouter (token = OPENROUTER_API_KEY)
-openai_api_key: null
-gemini_api_key: null
-openrouter_api_key: null
-
-# Models (used by orchestration_mode='api' for planner/evaluator only)
-planner_model: "claude-opus-4-7"
-generator_model: "claude-opus-4-7"
-evaluator_model: "claude-opus-4-7"
-
-# GAN loop
-max_iterations_per_feature: 15
-evaluator_pass_score: 8.0       # out of 10
-sprint_contract_enabled: true
-
-# Evaluator rubric weights (must sum to 1.0)
-evaluator_weights:
-  design_quality: 0.30
-  originality: 0.30
-  craft: 0.25
-  functionality: 0.15
-
-# Context management
-context_reset_threshold_tokens: 150000
+```json
+{
+  "project_name": "my-app",
+  "project_id": "a3f8c21b",
+  "brief": "One to four sentences describing what to build.",
+  "output_dir": "./output/my_app_a3f8c21b",
+  "orchestration_mode": "runner",
+  "code_runner": "subprocess",
+  "code_runner_model": "sonnet",
+  "codex_oss": false,
+  "codex_local_provider": null,
+  "code_runner_extra_args": [],
+  "progress_animation": "sparkle",
+  "progress_phrase_style": "playful",
+  "progress_text_effect": "typewriter",
+  "openai_api_key": null,
+  "gemini_api_key": null,
+  "openrouter_api_key": null,
+  "planner_model": "claude-opus-4-7",
+  "generator_model": "claude-opus-4-7",
+  "evaluator_model": "claude-opus-4-7",
+  "max_iterations_per_feature": 15,
+  "evaluator_pass_score": 8.0,
+  "sprint_contract_enabled": true,
+  "evaluator_weights": {
+    "design_quality": 0.30,
+    "originality": 0.30,
+    "craft": 0.25,
+    "functionality": 0.15
+  },
+  "context_reset_threshold_tokens": 150000
+}
 ```
 
 ---

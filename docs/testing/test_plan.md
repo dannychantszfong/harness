@@ -33,7 +33,7 @@ pytest tests/ -v
 - ContextReset threshold detection and handoff construction
 - SessionOpener context block generation
 - Orchestrator phase sequencing, GAN loop count, max-iteration guard
-- HarnessConfig YAML loading and weight validation
+- HarnessConfig JSON loading and weight validation
 - **All 3 coding-agent runners** — error paths (missing binary, missing package)
 - Runner factory (`create_runner`) with each `RunnerType`
 - `RunResult` fields are correctly populated when the runner exposes them (SDK transport)
@@ -175,9 +175,9 @@ Run with a simple 3-feature project, each runner in turn:
 
 ```bash
 # All three coding-agent runners
-harness run tests/fixtures/simple_project.yaml --runner subprocess
-harness run tests/fixtures/simple_project.yaml --runner sdk
-harness run tests/fixtures/simple_project.yaml --runner codex
+harness run tests/fixtures/simple_project/harness_config.json --runner subprocess
+harness run tests/fixtures/simple_project/harness_config.json --runner sdk
+harness run tests/fixtures/simple_project/harness_config.json --runner codex
 
 # Verify each mode by setting env vars before the run:
 ANTHROPIC_API_KEY=... harness run ... --runner subprocess  # Mode 2 (Claude API)

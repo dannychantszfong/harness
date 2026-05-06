@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from harness.config import HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.orchestrator import Orchestrator
 from harness.progress.models import (
     Feature,
@@ -165,7 +165,7 @@ class TestOrchestratorPhases:
 # ── Live config reload at seams ──────────────────────────────────────────────
 
 class TestLiveConfigReload:
-    """The orchestrator re-reads config.yaml at every natural seam (between
+    """The orchestrator re-reads harness_config.json at every natural seam (between
     features, between GAN iterations) so users can swap models / weights /
     iteration caps mid-run by editing the file."""
 
@@ -186,7 +186,7 @@ class TestLiveConfigReload:
             generator_model="claude-opus-4-7",
             evaluator_pass_score=8.0,
         )
-        config_path = tmp_path / "config.yaml"
+        config_path = tmp_path / CONFIG_FILENAME
         config.save_yaml(config_path)
 
         orch = Orchestrator(config)
@@ -229,7 +229,7 @@ class TestLiveConfigReload:
             orchestration_mode="runner",
             code_runner="subprocess",
         )
-        config.save_yaml(tmp_path / "config.yaml")
+        config.save_yaml(tmp_path / CONFIG_FILENAME)
         orch = Orchestrator(config)
 
         # Two consecutive reloads with no file change → both no-ops
@@ -253,7 +253,7 @@ class TestLiveConfigReload:
             code_runner="subprocess",
             project_id="abc12345",
         )
-        config_path = tmp_path / "config.yaml"
+        config_path = tmp_path / CONFIG_FILENAME
         config.save_yaml(config_path)
         orch = Orchestrator(config)
 
@@ -299,7 +299,7 @@ class TestLiveConfigReload:
             orchestration_mode="runner",
             code_runner="subprocess",
         )
-        config.save_yaml(tmp_path / "config.yaml")
+        config.save_yaml(tmp_path / CONFIG_FILENAME)
 
         # Pre-populate canonical features.json with several features but NO spec
         progress = ProjectProgress(

@@ -60,10 +60,17 @@ _FEATURE_TOOL = {
 class InitializerAgent(BaseAgent):
     role = "planner"
 
-    def run(self, brief: str) -> ProjectProgress:
+    def run(self, brief: str, spec: str | None = None) -> ProjectProgress:
         tracker = ProgressTracker(self.config)
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        spec_text = spec
+        if spec_text is None and self.config.spec_path.exists():
+            spec_text = self.config.spec_path.read_text()
+        planning_source = (
+            f"Project specification:\n{spec_text}"
+            if spec_text else f"Project brief: {brief}"
+        )
 
         # features.json may already exist in two shapes:
         #  - canonical ProjectProgress dict (this harness wrote it)
@@ -77,9 +84,9 @@ class InitializerAgent(BaseAgent):
                 return existing
 
         if self._use_runner:
-            raw_features, init_sh = self._decompose_via_runner(brief)
+            raw_features, init_sh = self._decompose_via_runner(planning_source)
         else:
-            raw_features, init_sh = self._decompose_via_api(brief)
+            raw_features, init_sh = self._decompose_via_api(planning_source)
 
         # ── shared: build Feature objects ──────────────────────────────────
 
@@ -97,6 +104,7 @@ class InitializerAgent(BaseAgent):
         progress = ProjectProgress(
             project_name=self.config.project_name,
             brief=brief,
+            spec=spec_text,
             features=features,
             session_count=1,
             created_at=datetime.utcnow(),
@@ -116,13 +124,13 @@ class InitializerAgent(BaseAgent):
         )
         return progress
 
-    def _decompose_via_api(self, brief: str) -> tuple[list[dict], str]:
+    def _decompose_via_api(self, planning_source: str) -> tuple[list[dict], str]:
         """Use Anthropic API tool-use to get a structured feature list."""
         messages = [
             {
                 "role": "user",
                 "content": (
-                    f"Project brief: {brief}\n\n"
+                    f"{planning_source}\n\n"
                     "Please decompose this into a feature list and write an init.sh. "
                     "Use the set_feature_list tool to output your answer."
                 ),
@@ -139,7 +147,7 @@ class InitializerAgent(BaseAgent):
         inp = tool_uses[0]["input"]
         return inp["features"], inp.get("init_sh", "#!/bin/bash\necho 'No init script provided'")
 
-    def _decompose_via_runner(self, brief: str) -> tuple[list[dict], str]:
+    def _decompose_via_runner(self, planning_source: str) -> tuple[list[dict], str]:
         """Use the runner to decompose the brief.
 
         Agentic runners (Claude Code, Codex) prefer to write files directly,
@@ -148,7 +156,7 @@ class InitializerAgent(BaseAgent):
         """
         prompt = (
             f"{_SYSTEM}\n\n"
-            f"Project brief: {brief}\n\n"
+            f"{planning_source}\n\n"
             "Your task here is *only* to plan — do not implement any features yet, "
             "do not create source code, do not install dependencies.\n\n"
             "Write exactly two files in the current working directory:\n\n"
@@ -238,6 +246,7 @@ class InitializerAgent(BaseAgent):
         progress = ProjectProgress(
             project_name=self.config.project_name,
             brief=brief,
+            spec=self.config.spec_path.read_text() if self.config.spec_path.exists() else None,
             features=features,
             session_count=1,
             created_at=datetime.utcnow(),

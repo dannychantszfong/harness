@@ -33,7 +33,7 @@ export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
 pytest tests/ -v
 
 # 6. Run against an example
-harness run examples/web_app.yaml --runner subprocess
+harness run output/web_app_a3f8c21b/harness_config.json --runner subprocess
 ```
 
 ---
@@ -91,8 +91,8 @@ docker build -t claude-harness .
 docker run \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -v $(pwd)/output:/app/output \
-  -v $(pwd)/my_project.yaml:/app/my_project.yaml \
-  claude-harness run /app/my_project.yaml --runner subprocess
+  -v $(pwd)/output/my_project_a3f8c21b/harness_config.json:/app/output/my_project_a3f8c21b/harness_config.json \
+  claude-harness run /app/output/my_project_a3f8c21b/harness_config.json --runner subprocess
 ```
 
 > **Note:** All three runners require their coding-agent CLI inside the container. Subscription mode requires the user to be signed in to that CLI inside the image; for headless deployments, prefer Mode 2 (`ANTHROPIC_API_KEY`) or Mode 4 (`OPENAI_API_KEY`).
@@ -119,13 +119,13 @@ docker run \
 ```bash
 conda activate harness
 
-nohup harness run my_project.yaml --runner subprocess \
+nohup harness run output/my_project_a3f8c21b/harness_config.json --runner subprocess \
   > harness.log 2>&1 &
 echo $! > harness.pid
 
 # Monitor
 tail -f harness.log
-watch -n 30 "harness status my_project.yaml"
+watch -n 30 "harness status output/my_project_a3f8c21b/harness_config.json"
 
 # Stop gracefully
 kill -SIGINT $(cat harness.pid)
@@ -163,8 +163,6 @@ pip install -e ".[sdk]"  # if you use the SDK transport
 # was renamed. Check harness/progress/models.py changelog before upgrading
 # mid-project.
 #
-# Migrating from pre-2.1 configs: if config.yaml has
-# code_runner: anthropic|openai|gemini|openrouter, switch to one of the
-# three coding-agent runners (subprocess/sdk/codex) and set the matching
-# env var. See INC-06 in the runbook.
+# Harness-owned project config lives in harness_config.json so imported repos
+# can keep their own framework config files without collision.
 ```

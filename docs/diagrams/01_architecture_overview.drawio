@@ -20,7 +20,7 @@
         <mxCell id="runner-flag" value="--runner subprocess&#xa;--runner openrouter ..." style="shape=callout;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="user-layer">
           <mxGeometry x="420" y="25" width="200" height="55" as="geometry" />
         </mxCell>
-        <mxCell id="yaml" value="harness_config.yaml&#xa;code_runner: subprocess" style="shape=document;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="user-layer">
+        <mxCell id="json" value="harness_config.json&#xa;code_runner: subprocess" style="shape=document;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="user-layer">
           <mxGeometry x="800" y="25" width="200" height="55" as="geometry" />
         </mxCell>
 
@@ -140,7 +140,7 @@
         <!-- ── KEY EDGES ── -->
         <!-- CLI → Orchestrator -->
         <mxCell id="e-cli-orch" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="cli" target="orchestrator" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e-yaml-orch" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="yaml" target="orchestrator" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-json-orch" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="json" target="orchestrator" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
 
         <!-- Orchestrator → Agents -->
         <mxCell id="e-orch-init" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="orchestrator" target="initializer" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>

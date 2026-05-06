@@ -15,7 +15,7 @@ from typing import Optional
 
 from harness.agents.base import BaseAgent
 from harness.progress.models import Feature, ProjectProgress, SprintContract
-from harness.runners.base import CodeRunner, RunResult
+from harness.runners.base import CodeRunner, RunnerRateLimitedError, RunResult
 
 _CONTRACT_SYSTEM = """You are reviewing a sprint contract before implementation begins.
 Confirm you understand the acceptance criteria and flag anything ambiguous.
@@ -154,6 +154,11 @@ class GeneratorAgent(BaseAgent):
         )
 
         if not result.success:
+            if result.rate_limit_reset_at is not None:
+                raise RunnerRateLimitedError(
+                    reset_at=result.rate_limit_reset_at,
+                    raw_message=result.error or "",
+                )
             return f"[Runner error] {result.error}\n\nPartial output:\n{result.output}"
 
         # Accumulate token usage when the runner provides it

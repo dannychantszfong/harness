@@ -32,7 +32,7 @@
         <mxCell id="ds5" value="D5 — init.sh" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="440" y="640" width="200" height="50" as="geometry"/></mxCell>
 
         <!-- Flows: User → P1 -->
-        <mxCell id="f1" value="project brief&#xa;+ config.yaml" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="user" target="p1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f1" value="project brief&#xa;+ harness_config.json" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="user" target="p1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
 
         <!-- P1 → Claude API -->
         <mxCell id="f2" value="feature decomposition&#xa;prompt" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p1" target="claude" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="150"/><mxPoint x="1040" y="150"/></Array></mxGeometry></mxCell>

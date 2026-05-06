@@ -61,7 +61,7 @@ Unchanged from v1.0 except:
 
 **Runner resolution order:**
 1. `runner_type` argument to `Orchestrator(config, runner_type=...)`
-2. `config.code_runner` string from YAML
+2. `config.code_runner` string from JSON
 3. Default: `RunnerType.SUBPROCESS`
 
 ---

@@ -5,9 +5,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import yaml
 
-from harness.config import HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.agents.reviewer import ReviewerAgent
 from harness.orchestrator import Orchestrator
 from harness.runners.base import PreflightResult, RunnerType
@@ -24,7 +23,7 @@ def _make_runner_config(tmp_path: Path) -> HarnessConfig:
         orchestration_mode="runner",
         code_runner="subprocess",
     )
-    cfg.save_yaml(tmp_path / "config.yaml")
+    cfg.save_yaml(tmp_path / CONFIG_FILENAME)
     return cfg
 
 

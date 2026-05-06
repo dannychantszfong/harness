@@ -1,15 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
+import json
 import uuid
 import yaml
 from pathlib import Path
 
+CONFIG_FILENAME = "harness_config.json"
+
 # Import here to avoid circular; config only stores the string value.
 # Runners are resolved at runtime by create_runner().
-_RUNNER_CHOICES = [
-    "subprocess", "sdk", "codex",           # agentic
-    "anthropic", "openai", "gemini", "openrouter",  # api
-]
+_RUNNER_CHOICES = ["subprocess", "sdk", "codex"]
 
 
 class EvaluatorWeights(BaseModel):
@@ -111,23 +111,44 @@ class HarnessConfig(BaseModel):
     #                          to route Claude Code through OpenRouter.
     # The harness does NOT auto-export these to the subprocess env — set them
     # in your shell or use a tool like direnv. The fields exist so you can
-    # persist what a project expects in config.yaml as documentation.
+    # persist what a project expects in harness_config.json as documentation.
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "HarnessConfig":
-        with open(path) as f:
-            data = yaml.safe_load(f)
+    def from_file(cls, path: str | Path) -> "HarnessConfig":
+        path = Path(path)
+        text = path.read_text()
+        if path.suffix.lower() == ".json":
+            data = json.loads(text)
+        else:
+            data = yaml.safe_load(text)
         return cls(**data)
 
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "HarnessConfig":
+        """Backward-compatible name; reads JSON when the file suffix is .json."""
+        return cls.from_file(path)
+
+    def save_file(self, path: str | Path) -> None:
+        """Serialize config to JSON by default, YAML only for .yaml/.yml paths."""
+        path = Path(path)
+        data = self.model_dump(mode="json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() == ".json":
+            path.write_text(json.dumps(data, indent=2) + "\n")
+        else:
+            with open(path, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
     def save_yaml(self, path: str | Path) -> None:
-        """Serialize config back to a YAML file."""
-        data = self.model_dump()
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        """Backward-compatible name; writes JSON when the file suffix is .json."""
+        self.save_file(path)
+
+    @staticmethod
+    def default_config_path(project_dir: str | Path) -> Path:
+        return Path(project_dir) / CONFIG_FILENAME
 
     @property
     def output_path(self) -> Path:

@@ -44,26 +44,26 @@ harness runners   # confirm the three coding-agent rows print cleanly
 conda activate harness
 
 # Step 1 — Create config
-cp examples/web_app.yaml my_project.yaml
+cp output/web_app_a3f8c21b/harness_config.json output/my_project_a3f8c21b/harness_config.json
 # Edit: project_name, brief, output_dir, code_runner (optional)
 
 # Step 2 — Initialize
-harness init my_project.yaml "Your brief here"
+harness init output/my_project_a3f8c21b/harness_config.json "Your brief here"
 
 # Step 3 — Verify init
 ls output/my_project/
 # Expected: features.json  init.sh  progress.md  .git/
 
 # Step 4 — Check features
-harness status my_project.yaml
+harness status output/my_project_a3f8c21b/harness_config.json
 
 # Step 5 — Run (pick a coding-agent runner)
-harness run my_project.yaml                        # interactive prompt
-harness run my_project.yaml --runner subprocess    # Claude Code CLI
-harness run my_project.yaml --runner codex         # Codex CLI
+harness run output/my_project_a3f8c21b/harness_config.json                        # interactive prompt
+harness run output/my_project_a3f8c21b/harness_config.json --runner subprocess    # Claude Code CLI
+harness run output/my_project_a3f8c21b/harness_config.json --runner codex         # Codex CLI
 
 # Step 6 — Monitor (separate terminal)
-watch -n 10 "harness status my_project.yaml"
+watch -n 10 "harness status output/my_project_a3f8c21b/harness_config.json"
 ```
 
 ---
@@ -73,7 +73,7 @@ watch -n 10 "harness status my_project.yaml"
 The harness is fully restartable. Just re-run — it skips init and planning, and picks up from the last PENDING/FAILING feature.
 
 ```bash
-harness run my_project.yaml --runner subprocess
+harness run output/my_project_a3f8c21b/harness_config.json --runner subprocess
 ```
 
 ---
@@ -84,9 +84,9 @@ harness run my_project.yaml --runner subprocess
 harness runners   # shows the three coding-agent rows
 
 # Pick a coding agent (the runner)
-harness run config.yaml -r subprocess   # Claude Code CLI
-harness run config.yaml -r sdk          # Claude Code SDK
-harness run config.yaml -r codex        # Codex CLI
+harness run harness_config.json -r subprocess   # Claude Code CLI
+harness run harness_config.json -r sdk          # Claude Code SDK
+harness run harness_config.json -r codex        # Codex CLI
 
 # Then pick the auth/billing mode by setting env vars BEFORE the run:
 #
@@ -105,7 +105,7 @@ harness run config.yaml -r codex        # Codex CLI
 
 ### INC-01: `FileNotFoundError: Features file not found`
 **Cause:** `harness init` was never run, or `output_dir` in config is wrong  
-**Fix:** `harness init my_project.yaml "Your brief"`
+**Fix:** `harness init output/my_project_a3f8c21b/harness_config.json "Your brief"`
 
 ---
 
@@ -160,21 +160,7 @@ pip install -e ".[sdk]"
 
 ---
 
-### INC-06: Migrating an old config that references a removed API runner
-**Symptom:** `harness resume` errors with `Unknown runner type: 'anthropic'` (or `openai`/`gemini`/`openrouter`)
-**Cause:** Standalone API runners were removed; pick a coding-agent runner and set the matching env var
-**Fix:** edit `config.yaml`:
-```yaml
-code_runner: subprocess        # was: anthropic   → use Claude Code with ANTHROPIC_API_KEY
-# code_runner: codex           # was: openai      → use Codex with OPENAI_API_KEY
-# code_runner: subprocess      # was: openrouter  → use Claude Code with ANTHROPIC_BASE_URL routing
-```
-
-Then export the right env vars in your shell before `harness resume`.
-
----
-
-### INC-07: Coding-agent runner — required env var missing
+### INC-06: Coding-agent runner — required env var missing
 **Cause:** You picked a non-subscription mode (Claude API / OpenAI API / OpenRouter / Gemini) but the env var Claude Code or Codex needs isn't set
 **Fix:**
 ```bash
@@ -189,11 +175,11 @@ export ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
 export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
 ```
 
-The harness does NOT auto-export from `config.yaml` — set the env vars in your shell.
+The harness does NOT auto-export from `harness_config.json` — set the env vars in your shell.
 
 ---
 
-### INC-08: Subscription rate limit hit mid-run
+### INC-07: Subscription rate limit hit mid-run
 **Symptom:** Rich panel "Paused — rate limit" with a reset time; orchestrator exits cleanly
 **Cause:** Claude Code (Pro/Max) or Codex (Plus) usage cap reached
 **Fix:** If `auto_resume_on_rate_limit: true` (default), a launchd job is scheduled for shortly after the reset. Otherwise:
@@ -204,7 +190,7 @@ harness resume output/<project_dir>
 
 ---
 
-### INC-09: Evaluator never returns structured output
+### INC-08: Evaluator never returns structured output
 **Cause:** Evaluator prompt too long or model refuses tool use  
 **Note:** Evaluator uses Anthropic API in `api` orchestration mode, and the selected coding-agent runtime in `runner` mode.  
 **Fix:**
@@ -218,8 +204,10 @@ harness resume output/<project_dir>
 ### INC-10: Context resets happening too frequently
 **Cause:** `context_reset_threshold_tokens` is too low  
 **Fix:**
-```yaml
-context_reset_threshold_tokens: 180000  # max ~195k for Opus 4.7
+```json
+{
+  "context_reset_threshold_tokens": 180000
+}
 ```
 
 ---
@@ -245,7 +233,7 @@ harness --help
 
 ```bash
 # Progress summary
-watch -n 30 "harness status my_project.yaml"
+watch -n 30 "harness status output/my_project_a3f8c21b/harness_config.json"
 
 # Markdown progress file
 tail -f output/my_project/progress.md
@@ -254,5 +242,5 @@ tail -f output/my_project/progress.md
 cd output/my_project && git log --oneline -f
 
 # Full log with runner output
-harness run my_project.yaml -r subprocess 2>&1 | tee run.log
+harness run output/my_project_a3f8c21b/harness_config.json -r subprocess 2>&1 | tee run.log
 ```

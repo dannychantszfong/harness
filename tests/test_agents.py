@@ -9,6 +9,7 @@ The principle: in runner mode, no agent should require an Anthropic client.
 """
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from harness.agents import (
 )
 from harness.config import HarnessConfig
 from harness.progress.models import Feature
+from harness.runners.base import RunnerRateLimitedError, RunResult
 
 
 @pytest.fixture
@@ -107,6 +109,29 @@ def test_generator_run_raises_helpful_message(runner_config):
     with pytest.raises(NotImplementedError) as exc:
         agent.run()
     assert "implement_feature" in str(exc.value)
+
+
+def test_generator_raises_rate_limit_signal(runner_config):
+    """A generator cap hit must pause the orchestrator, not become evaluator text."""
+    reset_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(
+        output="",
+        success=False,
+        error="rate-limited",
+        rate_limit_reset_at=reset_at,
+    )
+    agent = GeneratorAgent(runner_config, runner=runner)
+    feature = Feature(id="f1", name="Login", description="signup + login", priority=0)
+
+    with pytest.raises(RunnerRateLimitedError) as exc:
+        agent.implement_feature(
+            feature=feature,
+            progress=MagicMock(),
+            session_preamble="context",
+        )
+
+    assert exc.value.reset_at == reset_at
 
 
 def test_evaluator_run_raises_helpful_message(runner_config):

@@ -29,8 +29,8 @@
 **US-14** — As a Claude subscriber, I want to use my existing subscription to run the harness, so I'm not charged extra API fees on top of my plan.
 
 > Acceptance criteria:
-> - `harness run config.yaml --runner subprocess` uses `claude --print` and my subscription
-> - `harness run config.yaml --runner sdk` uses `claude_code_sdk` and my subscription
+> - `harness run harness_config.json --runner subprocess` uses `claude --print` and my subscription
+> - `harness run harness_config.json --runner sdk` uses `claude_code_sdk` and my subscription
 > - No `ANTHROPIC_API_KEY` is required for agentic runners
 > - Console confirms "using subscription" at startup
 
@@ -39,7 +39,7 @@
 **US-15** — As a developer with an Anthropic API key but no Claude subscription, I want to use Mode 2 (Claude API) so Claude Code authenticates against my API key instead.
 
 > Acceptance criteria:
-> - With `ANTHROPIC_API_KEY` set, `harness run config.yaml --runner subprocess` uses the API key for Claude Code authentication
+> - With `ANTHROPIC_API_KEY` set, `harness run harness_config.json --runner subprocess` uses the API key for Claude Code authentication
 > - No subscription login is required for this mode
 > - Claude Code's pay-per-token billing applies — no separate "anthropic" runner needed
 
@@ -48,7 +48,7 @@
 **US-16** — As a developer who wants model flexibility, I want to route Claude Code through OpenRouter so I can use any model OpenRouter exposes.
 
 > Acceptance criteria:
-> - With `ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1` and `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY`, `harness run config.yaml --runner subprocess` routes through OpenRouter
+> - With `ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1` and `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY`, `harness run harness_config.json --runner subprocess` routes through OpenRouter
 > - `code_runner_model: anthropic/claude-sonnet-4-6` (or any OpenRouter model ID) selects the model
 > - Any valid OpenRouter model ID is accepted without code changes
 > - The harness does not auto-export these env vars — the user sets them in their shell, `direnv`, or `.env`
@@ -77,7 +77,7 @@
 **US-19** — As an OpenAI Codex user, I want to use the `codex` CLI as the runner, so my OpenAI subscription covers the implementation.
 
 > Acceptance criteria:
-> - `harness run config.yaml --runner codex` invokes the `codex` binary
+> - `harness run harness_config.json --runner codex` invokes the `codex` binary
 > - If `codex` is not on PATH, the error message includes installation instructions
 > - Codex runner runs non-interactively (`codex exec --dangerously-bypass-approvals-and-sandbox`)
 
@@ -119,16 +119,16 @@
 
 **US-13** — As an AI engineer, I want to tune evaluation weights per project type.
 
-**US-20** — As a developer, I want to set my runner in `config.yaml` so I never have to answer the interactive prompt on repeated runs.
+**US-20** — As a developer, I want to set my runner in `harness_config.json` so I never have to answer the interactive prompt on repeated runs.
 
 > Acceptance criteria:
-> - `code_runner: subprocess` in YAML config skips the prompt
+> - `"code_runner": "subprocess"` in `harness_config.json` skips the prompt
 > - Priority order: CLI flag > config file > interactive prompt
 > - Changing `code_runner` in config takes effect on next `harness run`
 
-**US-21** — As a developer, I want to document the provider keys a project expects in `config.yaml` so the next person can reproduce the setup.
+**US-21** — As a developer, I want to document the provider keys a project expects in `harness_config.json` so the next person can reproduce the setup.
 
 > Acceptance criteria:
-> - `openai_api_key`, `gemini_api_key`, `openrouter_api_key` fields exist in `config.yaml` and persist across `harness new` / `harness resume`
+> - `openai_api_key`, `gemini_api_key`, `openrouter_api_key` fields exist in `harness_config.json` and persist across `harness new` / `harness resume`
 > - These fields are documentation only — the harness does NOT auto-export them; the user must set the matching env var (`OPENAI_API_KEY`, etc.) in their shell so Claude Code or Codex picks it up
-> - For secrets in production, env vars should be set via `direnv`, `.env`, or a secrets manager rather than committed to YAML
+> - For secrets in production, env vars should be set via `direnv`, `.env`, or a secrets manager rather than committed to project config

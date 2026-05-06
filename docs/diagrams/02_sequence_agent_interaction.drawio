@@ -33,7 +33,7 @@
         <!-- ── PHASE 1: INITIALIZE ── -->
         <mxCell id="ph1-label" value="Phase 1: Initialize (once)" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=left;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="60" y="150" width="220" height="25" as="geometry"/></mxCell>
 
-        <mxCell id="s1" value="harness run config.yaml" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="125" y="185" as="sourcePoint"/><mxPoint x="315" y="185" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s1" value="harness run harness_config.json" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="125" y="185" as="sourcePoint"/><mxPoint x="315" y="185" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s2" value="run(brief)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="205" as="sourcePoint"/><mxPoint x="505" y="205" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s3" value="set_feature_list tool call" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="225" as="sourcePoint"/><mxPoint x="1265" y="225" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s4" value="features + init.sh content" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="245" as="sourcePoint"/><mxPoint x="505" y="245" as="targetPoint"/></mxGeometry></mxCell>
