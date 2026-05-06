@@ -539,6 +539,12 @@ def _runner_flags(f):
 @click.option("--fallback-on-rate-limit/--no-fallback-on-rate-limit", default=True,
               help="Rotate to the next profile when the active runner reports a usage cap.")
 @click.option("--show", is_flag=True, default=False, help="Show the saved setup.")
+@click.option("--auto-install/--no-auto-install", default=False,
+              help="Try to auto-install missing tools (`brew install gh` on macOS, "
+                   "`winget install GitHub.cli` on Windows). Off by default.")
+@click.option("--skip-preflight", is_flag=True, default=False,
+              help="Skip the gh + coding-agent CLI preflight. Use only when you "
+                   "know what you're doing.")
 def setup(
     config_path: str | None,
     profiles: tuple[str, ...],
@@ -550,8 +556,17 @@ def setup(
     reviewer_order: str | None,
     fallback_on_rate_limit: bool,
     show: bool,
+    auto_install: bool,
+    skip_preflight: bool,
 ):
-    """Configure first-run runner rotation and fallback policy."""
+    """Configure first-run runner rotation and fallback policy.
+
+    GitHub sync is treated as core infrastructure: this command verifies
+    that `gh` is installed and authenticated, plus the coding-agent CLI
+    for each runner you've configured. Setup is blocked when any required
+    tool is missing — pass --auto-install to attempt installation via the
+    host's package manager (Homebrew on macOS, winget on Windows).
+    """
     path = Path(config_path).expanduser() if config_path else default_setup_path()
 
     has_noninteractive_input = bool(
@@ -582,9 +597,63 @@ def setup(
     else:
         setup_config = _interactive_setup()
 
+    if not skip_preflight:
+        if not _run_setup_preflight(setup_config, auto_install=auto_install):
+            console.print(
+                "[red]Setup not saved.[/red] Fix the missing tools above and "
+                "re-run, or pass --skip-preflight to bypass (not recommended)."
+            )
+            raise SystemExit(1)
+
     saved_path = save_setup(setup_config, path)
     console.print(f"[green]Harness setup saved:[/green] {saved_path}")
     _print_setup(setup_config, saved_path)
+
+
+def _run_setup_preflight(setup_config, *, auto_install: bool) -> bool:
+    """Verify required tools are present + authenticated. Returns True iff OK."""
+    from harness import preflight
+
+    runner_names = {p.runner for p in setup_config.runner_profiles}
+    checks = [preflight.gh_check()] + preflight.runner_checks_for(runner_names)
+
+    console.print("\n[bold]Verifying required tools…[/bold]")
+    results = preflight.run_preflight(checks, auto_install=auto_install)
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Tool", style="bold")
+    table.add_column("Purpose")
+    table.add_column("Status")
+    for r in results:
+        if r.ok:
+            status = "[green]ok[/green]"
+            if r.installed_now:
+                status += " [dim](installed during setup)[/dim]"
+        else:
+            status = f"[red]{r.error}[/red]"
+        table.add_row(r.tool.name, r.tool.purpose, status)
+    console.print(table)
+
+    failures = [r for r in results if not r.ok and r.tool.required]
+    if not failures:
+        console.print("[green]All required tools present.[/green]\n")
+        return True
+
+    console.print()
+    for r in failures:
+        hint = preflight.manual_hint_for(r.tool)
+        console.print(Panel(
+            f"[red]{r.error}[/red]\n"
+            + (f"[dim]{r.auth_detail}[/dim]\n\n" if r.auth_detail else "\n")
+            + f"[bold]Install:[/bold]\n{hint}\n\n"
+            + (
+                "[bold]Then authenticate:[/bold]\n  gh auth login"
+                if r.tool.name == "gh" else ""
+            ),
+            title=f"[red]Missing: {r.tool.name}[/red]",
+            border_style="red",
+        ))
+    return False
 
 
 @main.command()

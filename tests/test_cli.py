@@ -154,9 +154,13 @@ def test_new_persists_project_github_repo(runner, tmp_path, monkeypatch):
 def test_setup_writes_runner_rotation_config(runner, tmp_path):
     setup_path = tmp_path / "setup.json"
 
+    # --skip-preflight: this test pins the persistence contract, not the
+    # tool-availability check. Preflight has its own dedicated tests in
+    # tests/test_preflight.py.
     result = runner.invoke(main, [
         "setup",
         "--config", str(setup_path),
+        "--skip-preflight",
         "--profile", "claude:subprocess:sonnet",
         "--profile", "codex:codex:gpt-5.2",
         "--profile", "openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter",
