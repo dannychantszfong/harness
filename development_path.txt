@@ -14,3 +14,6 @@ And the main thing for having api is just simple for claude code and codex(mainl
 
 
 And esstiencially, i am levaging the good Infrastructure of claude 
+
+
+the very key idea in this project, which is, the main thing is claude code and codex, not the model, well, not only the model, but the coding agent architecture that you and claude code provide. So essentially, you two are the car frame for this project, and the models lives inside you two are the engine. So here is what i want to do, firstly, allows users to plug in whatever models from whatever platform they want to either codex or claude code before they have started their project.

@@ -88,10 +88,11 @@ class SubprocessRunner(CodeRunner):
             ).stdout.strip()
         except Exception:
             ver = "unknown version"
+        model = getattr(self.config, "code_runner_model", None) or "runner default"
         return PreflightResult(
             ok=True,
             summary="Claude Code CLI  ·  subscription billing  ·  full file I/O",
-            details=f"Binary: {path}  ({ver})",
+            details=f"Binary: {path}  ({ver})   Model: {model}",
         )
 
     def implement(self, prompt: str, cwd: str, timeout_seconds: int = 600) -> RunResult:
@@ -107,14 +108,20 @@ class SubprocessRunner(CodeRunner):
 
         console.print("[dim]Runner: Claude Code CLI (subprocess) — using subscription[/dim]")
 
+        cmd = [
+            "claude",
+            "--print",                         # non-interactive, print final output
+            "--dangerously-skip-permissions",  # required for unattended use
+        ]
+        model = getattr(self.config, "code_runner_model", None)
+        if model:
+            cmd.extend(["--model", model])
+        cmd.extend(getattr(self.config, "code_runner_extra_args", []) or [])
+        cmd.append(prompt)
+
         try:
             result = subprocess.run(
-                [
-                    "claude",
-                    "--print",                      # non-interactive, print final output
-                    "--dangerously-skip-permissions",  # required for unattended use
-                    prompt,
-                ],
+                cmd,
                 cwd=cwd,
                 capture_output=True,
                 text=True,

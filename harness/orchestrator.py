@@ -52,6 +52,10 @@ class Orchestrator:
         "max_iterations_per_feature",
         "context_reset_threshold_tokens",
         "sprint_contract_enabled",
+        "code_runner_model",
+        "codex_oss",
+        "codex_local_provider",
+        "code_runner_extra_args",
     )
 
     def __init__(self, config: HarnessConfig, runner_type: RunnerType | None = None) -> None:

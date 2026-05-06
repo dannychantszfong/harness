@@ -109,13 +109,16 @@ OPENROUTER  — openrouter_api_runner.py — OpenAI-compatible proxy
 
 ### 3.3 Agent Layer (`harness/agents/`)
 
-**`GeneratorAgent`** — updated in v2.0:
+**`GeneratorAgent`**:
 - Constructor accepts `runner: CodeRunner`
 - `implement_feature()` calls `self.runner.implement(prompt, cwd)` instead of `self._call()`
-- Sprint contract negotiation (`negotiate_sprint_contract`) still uses direct Anthropic API call (it's a structured tool-use call, not an agentic task)
 - Token usage from `RunResult` is accumulated into `self.usage`
 
-All other agents (`InitializerAgent`, `PlannerAgent`, `EvaluatorAgent`) use `BaseAgent._call()` directly — they always call the Anthropic API regardless of runner choice.
+**Orchestration agents** (`InitializerAgent`, `PlannerAgent`, `EvaluatorAgent`) route according to `orchestration_mode`:
+- `runner` mode: use the same coding-agent runtime as the generator, so Claude Code/Codex can carry the full workflow without API keys
+- `api` mode: use the Anthropic API directly for planner/evaluator structure while the generator uses the selected runner
+
+The model inside an agentic runner is selected through `code_runner_model` and passed to Claude Code/Codex as `--model`.
 
 ---
 
@@ -148,8 +151,8 @@ See [ADR.md](ADR.md). Summary of additions in v2.0:
 | Decision | Choice | Rejected Alternative |
 |----------|--------|---------------------|
 | Runner interface | Single `implement(prompt, cwd) → RunResult` | Separate interfaces per family |
-| Agent decoupling | Only GeneratorAgent uses the runner | All agents use runner |
-| Sprint contracts | Always via Anthropic API | Route through runner |
+| Agent routing | `orchestration_mode` controls runner vs API routing | Hard-code all agents to one provider |
+| Coding-agent model | `code_runner_model` passed to Claude Code/Codex | Treat model choice as API-only |
 | Provider precedence | CLI flag > config > prompt | Config-only, no CLI flag |
 
 ---

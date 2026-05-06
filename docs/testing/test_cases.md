@@ -253,4 +253,5 @@ Before each release, verify:
 - [ ] Missing API key for API runner shows correct env var name
 - [ ] `code_runner: sdk` in YAML skips the interactive prompt
 - [ ] Switching runner mid-project (config change) resumes from last state
-- [ ] `ANTHROPIC_API_KEY` is always required regardless of runner choice
+- [ ] `ANTHROPIC_API_KEY` is required for api orchestration, but not runner orchestration
+- [ ] `--model` is persisted as `code_runner_model` for Claude Code/Codex runners

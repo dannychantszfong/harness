@@ -7,6 +7,8 @@ A production orchestration framework for long-running AI coding agents, implemen
 
 Supports **7 interchangeable runners** and **2 orchestration modes** — run everything on your Claude/OpenAI subscription with no API key, or mix-and-match subscription generators with API-powered planners and evaluators.
 
+**Core idea:** the harness is built around coding-agent runtimes, not raw model calls. Claude Code and Codex provide the agent architecture — tools, file edits, shell execution, git workflow, and session behavior. The selected model is the engine inside that frame, and users can choose that engine before a project starts.
+
 ---
 
 ## Quick Start
@@ -19,6 +21,8 @@ pip install -e ".[all-providers]"
 # 2. Start a new project — interactive, no YAML needed
 harness new --claude-code        # pure subscription, no API key required
 harness new --claude-sdk         # same but via SDK (structured output)
+harness new --claude-code --model sonnet
+harness new --codex --model gpt-5.2
 harness new --openai-api         # pay-per-token, needs OPENAI_API_KEY
 harness new                      # shows interactive runner menu
 
@@ -96,6 +100,27 @@ The **runner** is what executes implementation work. Pick the one that fits your
 **Agentic runners** (`--claude-code`, `--claude-sdk`, `--codex`) write files, run shell commands, and commit git — they use your existing subscription.
 
 **API runners** stream text output only. The model describes what it would build; no files are written automatically.
+
+### Coding Agent Model Selection
+
+For Claude Code and Codex runners, `--model` selects the model used inside the coding agent runtime:
+
+```bash
+harness new --claude-code --model sonnet
+harness new --claude-sdk --model claude-sonnet-4-6
+harness new --codex --model gpt-5.2
+```
+
+If you omit `--model`, `harness new` asks once during setup. Press Enter to use the runner's own default. The selected value is saved as `code_runner_model` in `config.yaml`.
+
+Codex local/open-source routing can be configured in YAML:
+
+```yaml
+code_runner: "codex"
+code_runner_model: "qwen2.5-coder"
+codex_oss: true
+codex_local_provider: "ollama"   # or "lmstudio"
+```
 
 ---
 
@@ -255,6 +280,16 @@ orchestration_mode: "runner"
 # Options: subprocess | sdk | codex | anthropic | openai | gemini | openrouter
 code_runner: "subprocess"
 
+# Coding-agent runtime model.
+# For Claude Code / Codex, this is passed to the agent CLI as --model.
+# Leave null to use the selected runtime's default model.
+code_runner_model: "sonnet"
+
+# Codex local/open-source routing
+codex_oss: false
+codex_local_provider: null       # ollama | lmstudio
+code_runner_extra_args: []       # advanced CLI escape hatch
+
 # API keys for non-Anthropic runners (can also be set as env vars)
 openai_api_key: null      # or OPENAI_API_KEY
 gemini_api_key: null      # or GEMINI_API_KEY
@@ -315,8 +350,8 @@ Every runner validates itself before the first feature runs. If something is wro
 
 ```bash
 conda activate harness
-python -m pytest tests/ -v          # 57 tests, no API key needed — all mocked
-python -m pytest tests/test_runners.py -v   # runner-specific (33 tests)
+python -m pytest tests/ -v          # 99+ tests, no API key needed — all mocked
+python -m pytest tests/test_runners.py -v   # runner-specific coverage
 ```
 
 ---

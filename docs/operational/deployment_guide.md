@@ -20,7 +20,7 @@ pip install -e ".[gemini]"         # Google Gemini runner
 pip install -e ".[dev]"            # pytest, pytest-asyncio, pytest-mock
 
 # 3. Set API keys
-export ANTHROPIC_API_KEY=sk-ant-...   # always required (Planner + Evaluator)
+export ANTHROPIC_API_KEY=sk-ant-...   # api orchestration or anthropic runner
 export OPENAI_API_KEY=sk-...          # if using openai / openrouter runner
 export GEMINI_API_KEY=AIza...         # if using gemini runner
 export OPENROUTER_API_KEY=sk-or-...   # if using openrouter runner
@@ -38,12 +38,12 @@ harness run examples/web_app.yaml --runner subprocess
 
 | Variable | Required | Used by |
 |----------|----------|---------|
-| `ANTHROPIC_API_KEY` | **Always** | Planner, Evaluator, `anthropic` runner |
+| `ANTHROPIC_API_KEY` | `orchestration_mode: api` or `anthropic` runner | Planner, Evaluator, `anthropic` runner |
 | `OPENAI_API_KEY` | If using `openai` or `openrouter` runner | `openai_api_runner.py`, `openrouter_api_runner.py` |
 | `GEMINI_API_KEY` | If using `gemini` runner | `gemini_api_runner.py` |
 | `OPENROUTER_API_KEY` | If using `openrouter` runner | `openrouter_api_runner.py` |
 
-> **Note:** `ANTHROPIC_API_KEY` is always required because the Planner and Evaluator agents always call the Anthropic API regardless of which runner is selected for the Generator.
+> **Note:** In `runner` mode, subscription runtimes such as Claude Code and Codex can drive planner, evaluator, and generator without `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -108,7 +108,7 @@ docker run \
 | `gemini` | ~$1.25/$10 per 1M in/out (2.5 Pro) | ~$0.5–2 |
 | `openrouter` | model-dependent | varies |
 
-> Planner and Evaluator always bill to `ANTHROPIC_API_KEY` regardless of runner. Budget ~$0.50–1.00 per feature for Planner+Evaluator overhead.
+> In `api` orchestration mode, planner/evaluator bill to `ANTHROPIC_API_KEY`. In `runner` mode, that overhead stays inside the selected subscription coding-agent runtime.
 
 ---
 

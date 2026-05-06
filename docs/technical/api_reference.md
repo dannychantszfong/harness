@@ -208,6 +208,10 @@ output_dir: "./output/web_app"
 #   subprocess | sdk | codex         (agentic, subscription)
 #   anthropic | openai | gemini | openrouter  (API, pay-per-token)
 code_runner: null
+code_runner_model: null        # Claude Code/Codex --model, or runner default
+codex_oss: false               # use Codex OSS provider routing
+codex_local_provider: null     # ollama | lmstudio
+code_runner_extra_args: []     # advanced runner CLI flags
 
 # ── Provider API keys (prefer env vars over config) ──────────────────────────
 openai_api_key: null       # or set OPENAI_API_KEY
@@ -215,8 +219,9 @@ gemini_api_key: null       # or set GEMINI_API_KEY
 openrouter_api_key: null   # or set OPENROUTER_API_KEY
 
 # ── Model selection ──────────────────────────────────────────────────────────
-# Planner and Evaluator always use the Anthropic API (claude-opus-4-7).
-# generator_model controls API runners. Ignored for agentic runners.
+# In runner orchestration mode, planner/evaluator/generator use the selected
+# coding-agent runtime. In api mode, planner/evaluator use Anthropic API.
+# generator_model controls API runners. code_runner_model controls agentic runners.
 planner_model: "claude-opus-4-7"
 generator_model: "claude-opus-4-7"   # or "gpt-4o", "gemini-2.5-pro", "anthropic/claude-opus-4-7"
 evaluator_model: "claude-opus-4-7"
@@ -242,7 +247,7 @@ sprint_contract_enabled: true
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | `anthropic` runner, Planner, Evaluator | Anthropic API key |
+| `ANTHROPIC_API_KEY` | `anthropic` runner, api orchestration | Anthropic API key |
 | `OPENAI_API_KEY` | `openai` runner | OpenAI API key |
 | `GEMINI_API_KEY` | `gemini` runner | Google Gemini API key |
 | `OPENROUTER_API_KEY` | `openrouter` runner | OpenRouter API key |

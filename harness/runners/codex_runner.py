@@ -40,10 +40,17 @@ class CodexRunner(CodeRunner):
             ).stdout.strip()
         except Exception:
             ver = "unknown version"
+        model = getattr(self.config, "code_runner_model", None) or "runner default"
+        provider = "default provider"
+        local_provider = getattr(self.config, "codex_local_provider", None)
+        if local_provider:
+            provider = f"local OSS via {local_provider}"
+        elif getattr(self.config, "codex_oss", False):
+            provider = "open-source provider"
         return PreflightResult(
             ok=True,
             summary="OpenAI Codex CLI  ·  OpenAI subscription  ·  full file I/O",
-            details=f"Binary: {path}  ({ver})",
+            details=f"Binary: {path}  ({ver})   Model: {model}   Provider: {provider}",
         )
 
     def implement(self, prompt: str, cwd: str, timeout_seconds: int = 600) -> RunResult:
@@ -60,14 +67,28 @@ class CodexRunner(CodeRunner):
 
         console.print("[dim]Runner: OpenAI Codex CLI — using OpenAI subscription[/dim]")
 
+        cmd = [
+            "codex",
+            "exec",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            "--color",
+            "never",
+        ]
+        model = getattr(self.config, "code_runner_model", None)
+        if model:
+            cmd.extend(["--model", model])
+        local_provider = getattr(self.config, "codex_local_provider", None)
+        if local_provider:
+            cmd.extend(["--oss", "--local-provider", local_provider])
+        elif getattr(self.config, "codex_oss", False):
+            cmd.append("--oss")
+        cmd.extend(getattr(self.config, "code_runner_extra_args", []) or [])
+        cmd.append(prompt)
+
         try:
             result = subprocess.run(
-                [
-                    "codex",
-                    "--approval-mode", "full-auto",  # non-interactive
-                    "--quiet",
-                    prompt,
-                ],
+                cmd,
                 cwd=cwd,
                 capture_output=True,
                 text=True,

@@ -46,10 +46,15 @@ class SDKRunner(CodeRunner):
             version = getattr(claude_code_sdk, "__version__", "installed")
         except Exception:
             version = "installed"
+        model = getattr(self.config, "code_runner_model", None) or "runner default"
         return PreflightResult(
             ok=True,
             summary="Claude Code SDK  ·  subscription billing  ·  full file I/O",
-            details=f"claude_code_sdk {version}  (same subscription as CLI, adds structured tool-call visibility)",
+            details=(
+                f"claude_code_sdk {version}  "
+                f"(same subscription as CLI, adds structured tool-call visibility)   "
+                f"Model: {model}"
+            ),
         )
 
     def implement(self, prompt: str, cwd: str, timeout_seconds: int = 600) -> RunResult:
@@ -81,6 +86,7 @@ class SDKRunner(CodeRunner):
                 options=ClaudeCodeOptions(
                     cwd=cwd,
                     max_turns=50,
+                    model=getattr(self.config, "code_runner_model", None),
                 ),
             ):
                 msg_type = type(message).__name__

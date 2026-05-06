@@ -64,6 +64,45 @@ def test_new_with_api_flag_on_subscription_runner_demands_key(runner, monkeypatc
     assert "ANTHROPIC_API_KEY" in result.output
 
 
+def test_new_persists_agentic_coding_model(runner, tmp_path, monkeypatch):
+    """`harness new --codex --model ...` stores the model before project start."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.chdir(tmp_path)
+    fake_runner = MagicMock()
+    monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: fake_runner)
+    monkeypatch.setattr(
+        "harness.agents.planner.PlannerAgent.align_requirements",
+        lambda self, brief: "# Confirmed spec",
+    )
+
+    captured = {}
+
+    class FakeOrchestrator:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+            captured["runner_type"] = runner_type
+        def run(self, *a, **kw):
+            captured["ran"] = True
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+
+    result = runner.invoke(
+        main,
+        ["new", "--codex", "--model", "gpt-5.2"],
+        input="Harness\nBuild an agent harness\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["ran"] is True
+    assert captured["config"].code_runner == "codex"
+    assert captured["config"].code_runner_model == "gpt-5.2"
+
+    config_files = list((tmp_path / "output").glob("*/config.yaml"))
+    assert len(config_files) == 1
+    saved = yaml.safe_load(config_files[0].read_text())
+    assert saved["code_runner_model"] == "gpt-5.2"
+
+
 # ── `harness resume` ─────────────────────────────────────────────────────────
 
 def test_resume_missing_config_yaml(runner, tmp_path):

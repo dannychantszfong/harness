@@ -72,6 +72,14 @@ class HarnessConfig(BaseModel):
     # Options: subprocess | sdk | codex | anthropic | openai | gemini | openrouter
     code_runner: Optional[str] = None
 
+    # Model/provider knobs for agentic coding runtimes.
+    # code_runner_model is passed to Claude Code/Codex as their session model.
+    # For Codex, codex_oss/codex_local_provider expose local-provider routing.
+    code_runner_model: Optional[str] = None
+    codex_oss: bool = False
+    codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
+    code_runner_extra_args: list[str] = Field(default_factory=list)
+
     # API keys for non-Anthropic providers (can also be set via env vars)
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None

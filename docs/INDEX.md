@@ -62,11 +62,17 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 ```bash
 conda create -n harness python=3.12 -y && conda activate harness
 pip install -e ".[all-providers]"
-export ANTHROPIC_API_KEY=sk-ant-...
 harness runners                              # see all options
-harness run examples/web_app.yaml            # prompted to pick runner
-harness run examples/web_app.yaml -r sdk     # skip prompt
+harness new --claude-code --model sonnet     # Claude Code frame, chosen engine
+harness new --codex --model gpt-5.2          # Codex frame, chosen engine
+harness run examples/web_app.yaml -r sdk     # run existing config
 ```
+
+---
+
+## Core Thesis
+
+The harness is centered on coding-agent runtimes, not raw model calls. Claude Code and Codex provide the frame: tool use, repository edits, shell execution, commits, and session behavior. The model is the engine inside that frame. `code_runner_model` lets users choose that engine before a project starts while keeping the same harness workflow.
 
 ---
 
@@ -77,8 +83,8 @@ Session Open
   └─ read handoff → git log → features.json → run init.sh → select feature
         │
         ▼
-Sprint Contract  (Anthropic API — always)
-  └─ generator proposes acceptance criteria + out-of-scope
+Sprint Contract
+  └─ generator/evaluator agree on acceptance criteria + out-of-scope
         │
         ▼
   ┌─ GAN Loop ─────────────────────────────────────────────────────────────┐
@@ -101,4 +107,4 @@ Context Reset (if token budget exceeded)
   └─ write HandoffDocument → reset counter → fresh session with preamble
 ```
 
-**Key invariant:** Planner and Evaluator always use the Anthropic API regardless of which runner is chosen for the Generator. `ANTHROPIC_API_KEY` is always required.
+**Key invariant:** In `runner` orchestration mode, planner/evaluator/generator all run through the selected coding-agent runtime. In `api` orchestration mode, planner and evaluator use Anthropic API while the generator uses the selected runner.

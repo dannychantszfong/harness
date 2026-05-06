@@ -10,8 +10,9 @@ Two families of runner:
              Pay-per-token; model outputs text only (no file I/O).
              Options: Anthropic, OpenAI, Gemini, OpenRouter.
 
-Only GeneratorAgent uses the runner. Planner and Evaluator always call
-the Anthropic API directly (they only need structured text/tool responses).
+GeneratorAgent always uses the runner. Planner/evaluator/initializer also
+use the runner in orchestration_mode="runner"; in orchestration_mode="api"
+they call the Anthropic API directly for structured responses.
 """
 
 from abc import ABC, abstractmethod

@@ -96,6 +96,50 @@ def _default_orchestration_mode(runner_type: RunnerType) -> str:
     return "runner" if runner_type in RunnerType.agentic() else "api"
 
 
+def _model_prompt_hint(runner_type: RunnerType) -> str:
+    """Short hint for the coding-agent model prompt."""
+    if runner_type in (RunnerType.SUBPROCESS, RunnerType.SDK):
+        return "Claude Code model alias or full ID, e.g. sonnet, opus, claude-sonnet-4-6"
+    if runner_type == RunnerType.CODEX:
+        return "Codex model ID, e.g. gpt-5.2, gpt-5.4, or a local OSS model"
+    if runner_type == RunnerType.OPENAI:
+        return "OpenAI model ID, e.g. gpt-5.4"
+    if runner_type == RunnerType.GEMINI:
+        return "Gemini model ID, e.g. gemini-2.5-pro"
+    if runner_type == RunnerType.OPENROUTER:
+        return "OpenRouter model ID, e.g. anthropic/claude-sonnet-4-6"
+    return "Anthropic model ID, e.g. claude-sonnet-4-6"
+
+
+def _resolve_model_choice(runner_type: RunnerType, model_flag: str | None) -> str | None:
+    """Resolve the coding model for a new project.
+
+    Empty means "let the selected coding agent use its configured default".
+    """
+    if model_flag is not None:
+        model = model_flag.strip()
+        return model or None
+
+    console.print(
+        "\n[bold]Coding agent model[/bold]\n"
+        "[dim]This is the engine inside the Claude Code/Codex agent frame. "
+        "Press Enter to use the runner's default.[/dim]"
+    )
+    console.print(f"[dim]{_model_prompt_hint(runner_type)}[/dim]")
+    model = console.input("Model: ").strip()
+    return model or None
+
+
+def _apply_model_override(config: HarnessConfig, runner_type: RunnerType, model: str | None) -> None:
+    """Apply a CLI model override to the right config field."""
+    if not model:
+        return
+    if runner_type in RunnerType.agentic():
+        config.code_runner_model = model
+    else:
+        config.generator_model = model
+
+
 def _require_anthropic_key_for_api_mode(orchestration_mode: str) -> None:
     """Abort with a clear message if API orchestration mode needs a key that isn't set."""
     import os
@@ -168,8 +212,16 @@ def _runner_flags(f):
         "(no API key needed)."
     ),
 )
+@click.option(
+    "--model", "model", default=None,
+    help=(
+        "Model for the coding agent before the project starts. "
+        "Claude/Codex runners pass this to the CLI; API runners use it as generator_model."
+    ),
+)
 @_runner_flags
-def new(runner: str | None, with_api: bool, claude_code: bool, claude_sdk: bool,
+def new(runner: str | None, with_api: bool, model: str | None,
+        claude_code: bool, claude_sdk: bool,
         codex: bool, anthropic_api: bool, openai_api: bool, gemini: bool, openrouter: bool):
     """Create a new project interactively — no YAML needed.
 
@@ -221,6 +273,8 @@ def new(runner: str | None, with_api: bool, claude_code: bool, claude_sdk: bool,
         orchestration_mode = "api" if with_api else "runner"
     _require_anthropic_key_for_api_mode(orchestration_mode)
 
+    code_model = _resolve_model_choice(runner_type, model)
+
     # ── Step 3: Collect project name and brief ────────────────────────────
     project_name: str = click.prompt("Project name").strip()
     brief: str = click.prompt("What would you like to build? (brief description)").strip()
@@ -243,6 +297,7 @@ def new(runner: str | None, with_api: bool, claude_code: bool, claude_sdk: bool,
         orchestration_mode=orchestration_mode,
         code_runner=runner_type.value,
     )
+    _apply_model_override(config, runner_type, code_model)
 
     # Create the output dir now — the runner-mode planner uses it as cwd.
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -285,7 +340,11 @@ def new(runner: str | None, with_api: bool, claude_code: bool, claude_sdk: bool,
     default=None,
     help="Runner to use (skips interactive prompt).",
 )
-def run(config_file: str, runner: str | None):
+@click.option(
+    "--model", "model", default=None,
+    help="Override the coding-agent model for this run only.",
+)
+def run(config_file: str, runner: str | None, model: str | None):
     """Run the full harness for a project defined in CONFIG_FILE (YAML)."""
     config = HarnessConfig.from_yaml(config_file)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
@@ -298,6 +357,7 @@ def run(config_file: str, runner: str | None):
     )
 
     runner_type = _resolve_runner(config, runner)
+    _apply_model_override(config, runner_type, model)
 
     orchestrator = Orchestrator(config, runner_type=runner_type)
     orchestrator.run()
@@ -311,7 +371,11 @@ def run(config_file: str, runner: str | None):
     default=None,
     help="Override the runner saved in config.yaml (rarely needed).",
 )
-def resume(project_dir: str, runner: str | None):
+@click.option(
+    "--model", "model", default=None,
+    help="Override the coding-agent model for this resume only.",
+)
+def resume(project_dir: str, runner: str | None, model: str | None):
     """Resume work on an existing project.
 
     Pass the project's output directory (the one containing config.yaml).
@@ -382,6 +446,7 @@ def resume(project_dir: str, runner: str | None):
             )
 
     runner_type = _resolve_runner(config, runner)
+    _apply_model_override(config, runner_type, model)
     orchestrator = Orchestrator(config, runner_type=runner_type)
     orchestrator.run()
 

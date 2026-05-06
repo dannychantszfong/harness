@@ -131,23 +131,26 @@ Resolve runner with this priority:
 
 ---
 
-## ADR-010: Only GeneratorAgent Uses the Runner
+## ADR-010: Orchestration Mode Controls Agent Routing
 
-**Status:** Accepted  
+**Status:** Superseded by runner/api orchestration modes  
 **Date:** 2026-05-03  
 
 ### Context
 Should all agents (Planner, Evaluator, Initializer) be routed through the chosen runner?
 
 ### Decision
-Only `GeneratorAgent.implement_feature()` uses the `CodeRunner`. All other agents always call the Anthropic API via `BaseAgent._call()`.
+`GeneratorAgent.implement_feature()` always uses the selected `CodeRunner`. `InitializerAgent`, `PlannerAgent`, and `EvaluatorAgent` follow `orchestration_mode`:
+
+- `runner`: use the selected coding-agent runtime too
+- `api`: call the Anthropic API directly
 
 ### Rationale
-- Planner and Evaluator need structured tool use (sprint contracts, evaluation scores) — this requires precise API control, not an open-ended agentic session
-- Initializer uses tool use to return a structured feature list — same reasoning
-- Routing Planner/Evaluator through, say, the Codex CLI would make structured output unreliable
-- Keeping Planner/Evaluator on Anthropic API ensures consistent evaluation quality regardless of which runner generates the code
+- Runner mode lets Claude Code/Codex act as the full coding-agent frame without requiring API keys
+- API mode remains useful when precise Anthropic API control is preferred for planning/evaluation
+- The evaluator has runner-mode XML parsing as a fallback when API tool use is not available
 
 ### Consequences
-- `ANTHROPIC_API_KEY` is always required (for Planner and Evaluator), even when using a non-Anthropic generator runner
-- Evaluation quality is provider-consistent across all runner choices
+- Subscription-first runs can be fully API-key-free
+- API orchestration still requires `ANTHROPIC_API_KEY`
+- Model selection for agentic runtimes lives in `code_runner_model`

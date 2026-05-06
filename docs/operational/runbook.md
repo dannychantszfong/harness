@@ -22,8 +22,8 @@ pip install -e ".[openai]"        # OpenAI + OpenRouter runners
 pip install -e ".[gemini]"        # Google Gemini runner
 pip install -e ".[all-providers]" # Everything
 
-# 4. Set API keys (only needed for your chosen runners)
-export ANTHROPIC_API_KEY=sk-ant-...    # required for Planner + Evaluator always
+# 4. Set API keys (only needed for your chosen mode/runners)
+export ANTHROPIC_API_KEY=sk-ant-...    # api orchestration or anthropic runner
 export OPENAI_API_KEY=sk-...           # openai runner
 export GEMINI_API_KEY=AIza...          # gemini runner
 export OPENROUTER_API_KEY=sk-or-...    # openrouter runner
@@ -84,6 +84,7 @@ harness runners   # shows the full table with requirements
 harness run config.yaml -r subprocess   # needs: claude CLI installed
 harness run config.yaml -r sdk          # needs: pip install -e ".[sdk]"
 harness run config.yaml -r codex        # needs: codex CLI installed
+harness run config.yaml -r codex --model gpt-5.2
 
 # API (pay-per-token)
 harness run config.yaml -r anthropic    # needs: ANTHROPIC_API_KEY
@@ -188,9 +189,9 @@ openai_api_key: "sk-..."
 
 ### INC-09: Evaluator never returns structured output
 **Cause:** Evaluator prompt too long or model refuses tool use  
-**Note:** Evaluator always uses Anthropic API regardless of runner choice.  
+**Note:** Evaluator uses Anthropic API in `api` orchestration mode, and the selected coding-agent runtime in `runner` mode.  
 **Fix:**
-1. Confirm `ANTHROPIC_API_KEY` is set
+1. Confirm the selected orchestration mode has the credentials/runtime it needs
 2. Check `evaluator_model` is a capable model (`claude-opus-4-7`)
 3. Reduce sprint contract criteria count (≤ 10 items)
 4. Temporarily set `sprint_contract_enabled: false`

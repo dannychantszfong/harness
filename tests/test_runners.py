@@ -148,6 +148,28 @@ def test_subprocess_success(tmp_config, monkeypatch):
     assert result.output == "self-evaluation text"
 
 
+def test_subprocess_passes_configured_model(tmp_config, monkeypatch):
+    tmp_config.code_runner_model = "sonnet"
+    captured = {}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "ok"
+    mock_result.stderr = ""
+
+    def fake_run(args, *a, **k):
+        captured["args"] = args
+        return mock_result
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    runner = SubprocessRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is True
+    assert "--model" in captured["args"]
+    assert "sonnet" in captured["args"]
+
+
 def test_subprocess_no_token_data(tmp_config, monkeypatch):
     mock_result = MagicMock()
     mock_result.returncode = 0
@@ -194,7 +216,7 @@ def test_sdk_success(tmp_config, monkeypatch):
 
     mock_sdk = MagicMock()
     mock_sdk.query = fake_query
-    mock_sdk.ClaudeCodeOptions = MagicMock
+    mock_sdk.ClaudeCodeOptions = MagicMock()
 
     monkeypatch.setitem(sys.modules, "claude_code_sdk", mock_sdk)
 
@@ -203,6 +225,29 @@ def test_sdk_success(tmp_config, monkeypatch):
     assert result.success is True
     assert "Write" in result.tool_calls_observed
     assert result.cost_usd == pytest.approx(0.05)
+
+
+def test_sdk_passes_configured_model(tmp_config, monkeypatch):
+    """Claude Code SDK accepts the coding-agent model in ClaudeCodeOptions."""
+    tmp_config.code_runner_model = "opus"
+
+    class ResultMessage:
+        usage = None
+        cost_usd = 0.0
+
+    async def fake_query(*args, **kwargs):
+        yield ResultMessage()
+
+    mock_sdk = MagicMock()
+    mock_sdk.query = fake_query
+    mock_sdk.ClaudeCodeOptions = MagicMock()
+
+    monkeypatch.setitem(sys.modules, "claude_code_sdk", mock_sdk)
+
+    runner = SDKRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is True
+    assert mock_sdk.ClaudeCodeOptions.call_args.kwargs["model"] == "opus"
 
 
 # ── CodexRunner ───────────────────────────────────────────────────────────────
@@ -240,6 +285,33 @@ def test_codex_success(tmp_config, monkeypatch):
     result = runner.implement("prompt", cwd="/tmp")
     assert result.success is True
     assert result.output == "codex output"
+
+
+def test_codex_passes_model_and_local_provider(tmp_config, monkeypatch):
+    tmp_config.code_runner_model = "qwen2.5-coder"
+    tmp_config.codex_local_provider = "ollama"
+    captured = {}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "codex output"
+    mock_result.stderr = ""
+
+    def fake_run(args, *a, **k):
+        captured["args"] = args
+        return mock_result
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    runner = CodexRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is True
+    assert captured["args"][:2] == ["codex", "exec"]
+    assert "--model" in captured["args"]
+    assert "qwen2.5-coder" in captured["args"]
+    assert "--oss" in captured["args"]
+    assert "--local-provider" in captured["args"]
+    assert "ollama" in captured["args"]
 
 
 # ── APIRunner (Anthropic) ─────────────────────────────────────────────────────
