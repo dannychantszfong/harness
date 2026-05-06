@@ -113,7 +113,6 @@ class BaseAgent(ABC):
             with QuietAnimator.from_config(
                 self.config,
                 phase=phase,
-                subject=self.role,
             ):
                 resp = self.client.messages.create(**params)
             self.usage.update(resp.usage)

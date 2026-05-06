@@ -121,7 +121,7 @@ class SubprocessRunner(CodeRunner):
         cmd.append(prompt)
 
         try:
-            with QuietAnimator.from_config(self.config, phase="coding", subject="Claude Code"):
+            with QuietAnimator.from_config(self.config, phase="coding"):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,

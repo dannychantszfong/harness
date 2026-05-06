@@ -161,12 +161,12 @@ The runner status banner at startup always shows which mode is active:
 When the harness is waiting on a silent blocking step, it shows a small terminal pulse instead of looking frozen. The default uses rotating symbols plus short phrase transitions:
 
 ```text
-✧ C with Claude Code
-✦ Cooking with Claude Code
-✨ Cooking the sprint with Claude Code
+✧ S
+✦ Scrying
+✨ Inscribing
 ```
 
-Built-in animation packs: `sparkle`, `bloom`, `snow`, `braille`, `orbit`, `pulse`, `dots`, `moon`, `bars`, `clock`, `wave`, `tech`.
+Built-in animation packs: `sparkle`, `bloom`, `snow`, `braille`, `orbit`, `pulse`, `dots`, `moon`, `bars`, `clock`, `wave`, `tech`. The playful phrase style uses restrained magical verbs like `Scrying`, `Inscribing`, `Warding`, and `Attuning`.
 
 The animation runs only in interactive terminals and writes to stderr, so logs and piped output stay clean. Disable it with:
 

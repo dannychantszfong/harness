@@ -81,12 +81,12 @@ The harness is centered on coding-agent runtimes, not raw model calls. Claude Co
 Silent waits use a lightweight pulse so the process feels alive without polluting logs:
 
 ```text
-✧ C with Claude Code
-✦ Cooking with Claude Code
-✨ Cooking the sprint with Claude Code
+✧ S
+✦ Scrying
+✨ Inscribing
 ```
 
-Use `progress_animation` to choose packs such as `sparkle`, `bloom`, `braille`, `orbit`, `pulse`, or `bars`. Use `progress_text_effect` for `none`, `typewriter`, or `scramble`. Set `HARNESS_NO_SPINNER=1` to disable it.
+Use `progress_animation` to choose packs such as `sparkle`, `bloom`, `braille`, `orbit`, `pulse`, or `bars`. The playful phrase style stays to single magical verbs. Use `progress_text_effect` for `none`, `typewriter`, or `scramble`. Set `HARNESS_NO_SPINNER=1` to disable it.
 
 ---
 

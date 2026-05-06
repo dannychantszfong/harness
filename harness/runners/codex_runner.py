@@ -88,7 +88,7 @@ class CodexRunner(CodeRunner):
         cmd.append(prompt)
 
         try:
-            with QuietAnimator.from_config(self.config, phase="coding", subject="Codex"):
+            with QuietAnimator.from_config(self.config, phase="coding"):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,

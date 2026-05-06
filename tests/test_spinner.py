@@ -43,7 +43,6 @@ def test_animator_has_named_frame_packs():
 def test_animator_uses_typewriter_effect():
     animator = QuietAnimator(
         phase="coding",
-        subject="Codex",
         frame_pack="sparkle",
         phrase_style="playful",
         text_effect="typewriter",
@@ -53,8 +52,8 @@ def test_animator_uses_typewriter_effect():
     first = animator.render_line(0)
     later = animator.render_line(8)
     assert first.startswith("✦ ")
-    assert "with Codex" in first
-    assert "Cooking the sprint with Codex" in later
+    assert "with" not in first
+    assert "Inscribing" in later
     assert len(first) < len(later)
 
 
@@ -82,8 +81,18 @@ def test_animator_reads_config():
     animator = QuietAnimator.from_config(
         config,
         phase="evaluating",
-        subject="evaluator",
         enabled=False,
     )
     assert animator.frames == FRAME_PACKS["orbit"]
-    assert animator.render_line(0) == "◌ Evaluating with evaluator"
+    assert animator.render_line(0) == "◌ Evaluating"
+
+
+def test_playful_phrases_are_single_verbs():
+    animator = QuietAnimator(
+        phase="coding",
+        phrase_style="playful",
+        text_effect="none",
+        enabled=False,
+    )
+    for phrase in animator.phrases:
+        assert " " not in phrase

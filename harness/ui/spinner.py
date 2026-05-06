@@ -28,37 +28,24 @@ SCRAMBLE_CHARS = ("✧", "✦", "·", "⋆", "░", "▒", "/", "\\", "|", "-")
 
 PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
     "steady": {
-        "planning": ("Planning", "Mapping requirements", "Shaping the spec"),
-        "coding": ("Working", "Applying changes", "Building"),
-        "evaluating": ("Evaluating", "Checking acceptance criteria", "Reviewing"),
+        "planning": ("Planning", "Mapping", "Shaping"),
+        "coding": ("Working", "Applying", "Building"),
+        "evaluating": ("Evaluating", "Checking", "Reviewing"),
         "waiting": ("Thinking", "Working", "Waiting"),
     },
     "playful": {
-        "planning": (
-            "Sketching the map",
-            "Untangling the brief",
-            "Specsmithing",
-            "Finding the shape",
-        ),
+        "planning": ("Scrying", "Charting", "Divining", "Attuning", "Revealing"),
         "coding": (
-            "Cooking the sprint",
-            "Vibing with patches",
-            "Wiring the repo",
-            "Patchweaving",
-            "Making files behave",
+            "Inscribing",
+            "Enchanting",
+            "Forging",
+            "Weaving",
+            "Transmuting",
+            "Binding",
+            "Warding",
         ),
-        "evaluating": (
-            "Stress-testing the edges",
-            "Squinting at the details",
-            "Judging the craft",
-            "Poking the acceptance criteria",
-        ),
-        "waiting": (
-            "Thinking in patches",
-            "Brewing context",
-            "Spinning up",
-            "Reading the room",
-        ),
+        "evaluating": ("Revealing", "Discerning", "Scrying", "Weighing", "Testing"),
+        "waiting": ("Channeling", "Attuning", "Scrying", "Conjuring", "Gathering"),
     },
 }
 
