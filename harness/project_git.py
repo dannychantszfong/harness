@@ -2,6 +2,20 @@
 
 Harness itself ignores `output/`. Each generated project inside output is an
 independent git repository, optionally linked to its own GitHub repo.
+
+Two failure modes are separated on purpose:
+
+  • `ProjectGitConfigurationError` — the host is not actually ready for
+    GitHub sync (gh missing, or installed but unauthenticated). This is
+    a setup-time problem; `harness setup` is expected to catch it before
+    any project ever runs. The runtime check exists only as defense in
+    depth and fails loudly so the user fixes their environment, rather
+    than silently degrading.
+
+  • `ProjectGitSyncResult(ok=False, …)` — a transient runtime issue with
+    the actual sync: network blip, push rejected, remote changed by
+    someone else. These are not configuration problems and shouldn't
+    abort the harness run; they're surfaced as warnings.
 """
 
 from __future__ import annotations
@@ -12,6 +26,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harness.config import HarnessConfig
+
+
+class ProjectGitConfigurationError(Exception):
+    """Raised when the host's GitHub-sync prerequisites aren't satisfied.
+
+    Distinct from a transient sync failure (network, push rejected, etc.)
+    so the orchestrator can hard-fail on configuration problems while
+    keeping run-time hiccups non-fatal.
+    """
 
 
 @dataclass
@@ -52,6 +75,11 @@ def sync_project_git(config: HarnessConfig, reason: str = "workflow") -> Project
             return ProjectGitSyncResult(ok=True, skipped=True, message="no commits to push yet")
 
         _run(["git", "push", "-u", "origin", branch], cwd=project_dir)
+    except ProjectGitConfigurationError:
+        # Configuration errors must escape — they signal a missing/broken
+        # tool that `harness setup` should have caught. The orchestrator
+        # surfaces these as a hard failure, not a yellow warning panel.
+        raise
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
         return ProjectGitSyncResult(ok=False, message=detail)
@@ -86,11 +114,7 @@ def _resolve_remote(config: HarnessConfig, project_dir: Path) -> str:
 
 
 def _ensure_github_repo(config: HarnessConfig, project_dir: Path) -> None:
-    if not shutil.which("gh"):
-        raise RuntimeError(
-            "`gh` GitHub CLI is required to create/check project_github_repo. "
-            "Install gh, run `gh auth login`, or set project_git_remote to an existing repo URL."
-        )
+    _require_gh_ready()
 
     repo = (config.project_github_repo or "").strip()
     if repo.count("/") != 1 or any(not part for part in repo.split("/")):
@@ -108,6 +132,41 @@ def _ensure_github_repo(config: HarnessConfig, project_dir: Path) -> None:
         if "unknown flag" not in detail or "confirm" not in detail:
             raise
         _run(["gh", "repo", "create", repo, visibility], cwd=project_dir)
+
+
+def _require_gh_ready() -> None:
+    """Hard-fail when `gh` is missing or not authenticated.
+
+    GitHub sync is treated as required infrastructure: `harness setup`
+    runs the same check up front (see harness/preflight.py). This
+    function exists as defense in depth in case the user's environment
+    changed between setup and run, or sync was enabled on a project
+    config that bypassed setup.
+    """
+    if shutil.which("gh") is None:
+        raise ProjectGitConfigurationError(
+            "`gh` GitHub CLI is required for project GitHub sync but was not "
+            "found on PATH. Run `harness setup --auto-install` (macOS/Windows) "
+            "or install gh manually (https://cli.github.com/), then re-run "
+            "`harness setup` to verify. To opt out of GitHub sync entirely, "
+            "set `project_git_push: false` in the project config."
+        )
+
+    auth = subprocess.run(
+        ["gh", "auth", "status"],
+        capture_output=True,
+        text=True,
+    )
+    if auth.returncode != 0:
+        detail = (auth.stderr or auth.stdout or "").strip()
+        raise ProjectGitConfigurationError(
+            "`gh` is installed but not authenticated, so project GitHub sync "
+            "cannot proceed.\n"
+            f"gh auth status: {detail or '(no output)'}\n\n"
+            "Fix:\n"
+            "  gh auth login\n"
+            "Then re-run `harness setup` to confirm the environment is ready."
+        )
 
 
 def _ensure_remote(project_dir: Path, remote_url: str) -> None:

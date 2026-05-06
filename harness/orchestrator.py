@@ -31,7 +31,7 @@ from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
 from harness.progress.tracker import ProgressTracker
 from harness.progress.models import ProjectProgress, EvaluationResult
-from harness.project_git import sync_project_git
+from harness.project_git import ProjectGitConfigurationError, sync_project_git
 from harness.runner_profiles import (
     runner_for_profile,
     role_profiles,
@@ -571,12 +571,28 @@ class Orchestrator:
         return True
 
     def _sync_project_git(self, reason: str) -> None:
-        result = sync_project_git(self.config, reason=reason)
+        try:
+            result = sync_project_git(self.config, reason=reason)
+        except ProjectGitConfigurationError as exc:
+            # Configuration errors are not graceful-degrade material —
+            # `harness setup` is supposed to keep this from happening.
+            # Print a red panel and re-raise so the run aborts cleanly
+            # rather than churning through features with broken sync.
+            console.print(
+                Panel(
+                    str(exc),
+                    title="[red]Project GitHub sync misconfigured[/red]",
+                    border_style="red",
+                )
+            )
+            raise
         if result.skipped:
             return
         if result.ok:
             console.print(f"  [green]GitHub sync:[/green] {result.message}")
             return
+        # Transient runtime issues (network blip, push rejected, etc.)
+        # remain a yellow warning — they don't kill the run.
         console.print(
             Panel(
                 result.message,
