@@ -19,13 +19,12 @@ console = Console()
 
 _RUNNER_TABLE = [
     # (value, family, billing, file_i/o, requires)
+    # All runners are agentic. API providers (Anthropic, OpenAI, Gemini,
+    # OpenRouter) plug into one of these via env vars; they are not
+    # standalone runners. See harness/runners/base.py for the contract.
     ("subprocess", "Agentic", "Claude subscription", "✅ full", "`claude` CLI installed"),
     ("sdk",        "Agentic", "Claude subscription", "✅ full", "pip install claude-code-sdk"),
     ("codex",      "Agentic", "OpenAI subscription", "✅ full", "`codex` CLI installed"),
-    ("anthropic",  "API",     "Pay-per-token",        "❌ text only", "ANTHROPIC_API_KEY"),
-    ("openai",     "API",     "Pay-per-token",        "❌ text only", "OPENAI_API_KEY + pip install openai"),
-    ("gemini",     "API",     "Pay-per-token",        "❌ text only", "GEMINI_API_KEY + pip install google-generativeai"),
-    ("openrouter", "API",     "Pay-per-token",        "❌ text only", "OPENROUTER_API_KEY + pip install openai"),
 ]
 
 
@@ -100,14 +99,11 @@ def _resolve_runner(config: HarnessConfig, runner_flag: str | None) -> RunnerTyp
 
 
 # Named-flag → RunnerType mapping (for `harness new --claude-code` etc.)
+# Only the three coding-agent runners exist; API providers plug in via env.
 _FLAG_TO_RUNNER: dict[str, RunnerType] = {
     "claude_code":   RunnerType.SUBPROCESS,
     "claude_sdk":    RunnerType.SDK,
     "codex":         RunnerType.CODEX,
-    "anthropic_api": RunnerType.ANTHROPIC,
-    "openai_api":    RunnerType.OPENAI,
-    "gemini":        RunnerType.GEMINI,
-    "openrouter":    RunnerType.OPENROUTER,
 }
 
 
@@ -122,10 +118,13 @@ def _pick_runner_from_flags(**flags: bool) -> RunnerType | None:
 
 
 def _default_orchestration_mode(runner_type: RunnerType) -> str:
-    """Subscription runners default to 'runner' mode (no API key needed).
-    API runners are always locked to 'api' mode.
+    """All current runners default to 'runner' mode (no API key needed).
+
+    Users can still flip a project's config to orchestration_mode='api' to
+    have planner/evaluator/initializer call the Anthropic API directly while
+    the generator uses the runner — that path requires ANTHROPIC_API_KEY.
     """
-    return "runner" if runner_type in RunnerType.agentic() else "api"
+    return "runner"
 
 
 def _model_prompt_hint(runner_type: RunnerType) -> str:
@@ -134,13 +133,7 @@ def _model_prompt_hint(runner_type: RunnerType) -> str:
         return "Claude Code model alias or full ID, e.g. sonnet, opus, claude-sonnet-4-6"
     if runner_type == RunnerType.CODEX:
         return "Codex model ID, e.g. gpt-5.2, gpt-5.4, or a local OSS model"
-    if runner_type == RunnerType.OPENAI:
-        return "OpenAI model ID, e.g. gpt-5.4"
-    if runner_type == RunnerType.GEMINI:
-        return "Gemini model ID, e.g. gemini-2.5-pro"
-    if runner_type == RunnerType.OPENROUTER:
-        return "OpenRouter model ID, e.g. anthropic/claude-sonnet-4-6"
-    return "Anthropic model ID, e.g. claude-sonnet-4-6"
+    return "Coding agent model ID"
 
 
 def _resolve_model_choice(runner_type: RunnerType, model_flag: str | None) -> str | None:
@@ -268,10 +261,6 @@ def _runner_flags(f):
         ("--claude-code",   "claude_code",   "Claude Code CLI   (subprocess, uses your Claude subscription)"),
         ("--claude-sdk",    "claude_sdk",    "Claude Code SDK   (uses your Claude subscription, structured output)"),
         ("--codex",         "codex",         "OpenAI Codex CLI  (uses your OpenAI subscription)"),
-        ("--anthropic-api", "anthropic_api", "Anthropic API     (pay-per-token, ANTHROPIC_API_KEY)"),
-        ("--openai-api",    "openai_api",    "OpenAI API        (pay-per-token, OPENAI_API_KEY)"),
-        ("--gemini",        "gemini",        "Google Gemini API (pay-per-token, GEMINI_API_KEY)"),
-        ("--openrouter",    "openrouter",    "OpenRouter        (pay-per-token, OPENROUTER_API_KEY)"),
     ]
     for flag, param, help_text in reversed(flags):
         f = click.option(flag, param, is_flag=True, default=False, help=help_text)(f)
@@ -298,30 +287,27 @@ def _runner_flags(f):
     "--model", "model", default=None,
     help=(
         "Model for the coding agent before the project starts. "
-        "Claude/Codex runners pass this to the CLI; API runners use it as generator_model."
+        "Passed as --model to Claude Code / Codex; SDK uses it via ClaudeCodeOptions."
     ),
 )
 @_runner_flags
 def new(runner: str | None, with_api: bool, model: str | None,
-        claude_code: bool, claude_sdk: bool,
-        codex: bool, anthropic_api: bool, openai_api: bool, gemini: bool, openrouter: bool):
+        claude_code: bool, claude_sdk: bool, codex: bool):
     """Create a new project interactively — no YAML needed.
 
     Pick your runner via a named flag, or leave all flags off to get an
     interactive menu.
 
     \b
-    Subscription runners (no extra cost beyond your plan):
+    Coding-agent runners (subscription billing):
       harness new --claude-code     Claude Code CLI
       harness new --claude-sdk      Claude Code SDK
       harness new --codex           OpenAI Codex CLI
 
-    \b
-    API runners (pay-per-token):
-      harness new --anthropic-api   Anthropic API
-      harness new --openai-api      OpenAI API
-      harness new --gemini          Google Gemini API
-      harness new --openrouter      OpenRouter (any model)
+    Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) are not
+    standalone runners — set the relevant env var (ANTHROPIC_API_KEY,
+    OPENAI_API_KEY, ANTHROPIC_BASE_URL, etc.) and one of the three
+    coding-agent runners will use it as its underlying model.
     """
     console.print(
         Panel(
@@ -336,8 +322,6 @@ def new(runner: str | None, with_api: bool, model: str | None,
     # Named flags > --runner > interactive prompt. (No config file at this stage.)
     named = _pick_runner_from_flags(
         claude_code=claude_code, claude_sdk=claude_sdk, codex=codex,
-        anthropic_api=anthropic_api, openai_api=openai_api,
-        gemini=gemini, openrouter=openrouter,
     )
     if named:
         runner_type = named
@@ -347,12 +331,10 @@ def new(runner: str | None, with_api: bool, model: str | None,
         runner_type = _prompt_runner()
 
     # ── Step 2: Derive orchestration mode and validate keys up front ──────
-    # API runners are locked to "api" mode.
-    # Subscription runners default to "runner" mode unless --with-api is passed.
-    if runner_type in RunnerType.api_based():
-        orchestration_mode = "api"
-    else:
-        orchestration_mode = "api" if with_api else "runner"
+    # All current runners default to "runner" mode. --with-api opts the
+    # planner+evaluator+initializer into the Anthropic API; ANTHROPIC_API_KEY
+    # is then required.
+    orchestration_mode = "api" if with_api else "runner"
     _require_anthropic_key_for_api_mode(orchestration_mode)
 
     code_model = _resolve_model_choice(runner_type, model)
@@ -531,6 +513,167 @@ def resume(project_dir: str, runner: str | None, model: str | None):
     _apply_model_override(config, runner_type, model)
     orchestrator = Orchestrator(config, runner_type=runner_type)
     orchestrator.run()
+
+
+@main.command("import")
+@click.argument("source_path", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--in-place", "in_place", is_flag=True, default=False,
+    help="Write harness artifacts INTO the source repo. Default: copy into output/.",
+)
+@click.option(
+    "--name", "name", default=None,
+    help="Project name. Default: derived from source directory name.",
+)
+@click.option(
+    "--brief", "brief", default=None,
+    help="Project brief. Default: extracted from README, or prompted.",
+)
+@click.option(
+    "--review/--no-review", "review_flag", default=None,
+    help=(
+        "Force review-only mode (--review) or disable auto-review for done-looking "
+        "repos (--no-review). Default: auto-review when ≥80% features passing or "
+        "code+tests+README without harness artifacts."
+    ),
+)
+@click.option(
+    "--review-threshold", "review_threshold",
+    type=click.FloatRange(0.0, 1.0), default=0.8, show_default=True,
+    help="Feature pass-rate that auto-triggers review-only mode.",
+)
+@click.option(
+    "--runner", "-r",
+    type=click.Choice([r[0] for r in _RUNNER_TABLE], case_sensitive=False),
+    default=None,
+    help="Runner to use (skips interactive prompt).",
+)
+@click.option(
+    "--model", "model", default=None,
+    help="Override the coding-agent model.",
+)
+def import_repo(
+    source_path: str,
+    in_place: bool,
+    name: str | None,
+    brief: str | None,
+    review_flag: bool | None,
+    review_threshold: float,
+    runner: str | None,
+    model: str | None,
+):
+    """Import an existing repo and pick up at the right phase.
+
+    Detects what the repo already has — config / features / spec / code — and
+    enters the harness pipeline at the matching point. If the repo looks
+    finished (high feature pass rate, or code+tests+README without harness
+    artifacts), runs ReviewerAgent and writes REVIEW.md instead of building.
+
+    Default is to COPY the source into ./output/<slug>_<id>/. Pass --in-place
+    to harness-ify the source directory directly.
+    """
+    import shutil
+    import uuid
+    from harness.import_repo import detect_stage, EntryPhase
+
+    source = Path(source_path).resolve()
+    project_name = name or _slug_to_title(source.name)
+    project_id = uuid.uuid4().hex[:8]
+
+    # ── Step 1: Detect stage on the SOURCE first (so we can show it) ──────
+    src_report = detect_stage(source, review_pass_threshold=review_threshold)
+    console.print(Panel(
+        f"[bold]Source:[/bold] {source}\n"
+        f"[bold]Detected phase:[/bold] [cyan]{src_report.entry_phase.value}[/cyan]\n"
+        + "\n".join(f"  • {r}" for r in src_report.reasons),
+        title="[blue]Import — repo scan[/blue]",
+        border_style="blue",
+    ))
+
+    # ── Step 2: Decide working directory ──────────────────────────────────
+    if in_place:
+        output_dir = source
+        console.print(f"[yellow]In-place mode:[/yellow] writing harness artifacts into {output_dir}")
+    else:
+        slug = _slugify(project_name)
+        output_dir = Path("./output") / f"{slug}_{project_id}"
+        if output_dir.exists():
+            raise click.UsageError(f"Refusing to overwrite existing {output_dir}")
+        console.print(f"[dim]Copying source → {output_dir}[/dim]")
+        shutil.copytree(source, output_dir, ignore=shutil.ignore_patterns(
+            ".git", "node_modules", "__pycache__", ".venv", "venv",
+            "dist", "build", ".pytest_cache", ".mypy_cache", "target",
+        ))
+
+    # ── Step 3: Resolve runner ────────────────────────────────────────────
+    runner_type = RunnerType(runner) if runner else _prompt_runner()
+    orchestration_mode = _default_orchestration_mode(runner_type)
+    _require_anthropic_key_for_api_mode(orchestration_mode)
+
+    # ── Step 4: If config.yaml already exists in working dir, just resume ─
+    cfg_path = output_dir / "config.yaml"
+    if cfg_path.exists() and not in_place:
+        # Copied harness project — fall through to resume semantics
+        config = HarnessConfig.from_yaml(cfg_path)
+    elif cfg_path.exists() and in_place:
+        config = HarnessConfig.from_yaml(cfg_path)
+        console.print(f"[dim]Existing config.yaml found — using it.[/dim]")
+    else:
+        # Resolve brief
+        if brief is None and src_report.suggested_brief:
+            console.print("\n[bold]Suggested brief from README:[/bold]")
+            console.print(Panel(src_report.suggested_brief, border_style="dim"))
+            if click.confirm("Use this as the brief?", default=True):
+                brief = src_report.suggested_brief
+        if brief is None:
+            brief = click.prompt("Project brief").strip()
+        if not brief:
+            raise click.UsageError("Brief cannot be empty.")
+
+        config = HarnessConfig(
+            project_name=project_name,
+            project_id=project_id,
+            brief=brief,
+            output_dir=str(output_dir),
+            orchestration_mode=orchestration_mode,
+            code_runner=runner_type.value,
+        )
+        config.save_yaml(cfg_path)
+
+    _apply_model_override(config, runner_type, model)
+
+    # ── Step 5: Re-detect on the working dir (may differ from source after copy) ─
+    work_report = detect_stage(output_dir, review_pass_threshold=review_threshold)
+
+    # ── Step 6: Decide review_only ────────────────────────────────────────
+    if review_flag is True:
+        review_only = True
+        reason = "user passed --review"
+    elif review_flag is False:
+        review_only = False
+        reason = "user passed --no-review"
+    else:
+        review_only = work_report.entry_phase == EntryPhase.REVIEW_READY
+        reason = (
+            "auto: repo looks done"
+            if review_only else "auto: needs build/init"
+        )
+
+    console.print(Panel(
+        f"[bold]Mode:[/bold] {'[green]review-only[/green]' if review_only else '[cyan]build[/cyan]'} "
+        f"[dim]({reason})[/dim]\n"
+        f"[bold]Working dir:[/bold] {output_dir}\n"
+        f"[bold]Runner:[/bold] {runner_type.value}",
+        title="[green]Import plan[/green]",
+        border_style="green",
+    ))
+
+    orchestrator = Orchestrator(config, runner_type=runner_type)
+    orchestrator.run(review_only=review_only)
+
+
+def _slug_to_title(slug: str) -> str:
+    return " ".join(p.capitalize() for p in slug.replace("_", "-").split("-")) or slug
 
 
 @main.command("animation-theme")

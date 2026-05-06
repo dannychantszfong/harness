@@ -1,23 +1,22 @@
 from harness.runners.base import CodeRunner, RunResult, RunnerType, PreflightResult
-from harness.runners.api_runner import APIRunner
 from harness.runners.subprocess_runner import SubprocessRunner
 from harness.runners.sdk_runner import SDKRunner
 from harness.runners.codex_runner import CodexRunner
-from harness.runners.openai_api_runner import OpenAIAPIRunner
-from harness.runners.gemini_api_runner import GeminiAPIRunner
-from harness.runners.openrouter_api_runner import OpenRouterAPIRunner
 
 
 def create_runner(runner_type: RunnerType, config) -> CodeRunner:
-    """Factory — return the correct CodeRunner for the given type."""
+    """Factory — return the correct CodeRunner for the given type.
+
+    Only the three agentic runners (Claude Code CLI, Claude Code SDK, Codex CLI)
+    exist as first-class runners. API providers like Anthropic, OpenAI, Gemini,
+    or OpenRouter plug into one of these via env vars (e.g. ANTHROPIC_API_KEY,
+    OPENAI_API_KEY, ANTHROPIC_BASE_URL for OpenRouter routing through Claude
+    Code, or `codex --oss --local-provider` for OSS providers).
+    """
     mapping = {
-        RunnerType.ANTHROPIC:   APIRunner,
         RunnerType.SUBPROCESS:  SubprocessRunner,
         RunnerType.SDK:         SDKRunner,
         RunnerType.CODEX:       CodexRunner,
-        RunnerType.OPENAI:      OpenAIAPIRunner,
-        RunnerType.GEMINI:      GeminiAPIRunner,
-        RunnerType.OPENROUTER:  OpenRouterAPIRunner,
     }
     cls = mapping.get(runner_type)
     if cls is None:
@@ -26,7 +25,7 @@ def create_runner(runner_type: RunnerType, config) -> CodeRunner:
 
 
 __all__ = [
-    "CodeRunner", "RunResult", "RunnerType", "create_runner",
-    "APIRunner", "SubprocessRunner", "SDKRunner", "CodexRunner",
-    "OpenAIAPIRunner", "GeminiAPIRunner", "OpenRouterAPIRunner",
+    "CodeRunner", "RunResult", "RunnerType", "PreflightResult",
+    "create_runner",
+    "SubprocessRunner", "SDKRunner", "CodexRunner",
 ]

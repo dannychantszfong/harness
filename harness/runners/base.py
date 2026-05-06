@@ -1,18 +1,25 @@
 """Abstract base for all code runners.
 
-Two families of runner:
+The harness's backbone is a coding agent — Claude Code CLI, Claude Code SDK,
+or OpenAI Codex CLI. These three runners drive a full tool-using agent that
+writes files, runs tests, and commits git inside its own session.
 
-  AGENTIC  — drives a full tool-using agent that writes files to disk.
-             Uses your subscription (no extra API bill).
-             Options: Claude Code CLI, Claude Code SDK, OpenAI Codex CLI.
+Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) are NOT first-
+class runners. They flow into the agentic runners as the underlying *model*:
 
-  API      — single-turn Anthropic/OpenAI-compatible call.
-             Pay-per-token; model outputs text only (no file I/O).
-             Options: Anthropic, OpenAI, Gemini, OpenRouter.
+  • ANTHROPIC_API_KEY            → Claude Code / SDK (default Anthropic auth)
+  • ANTHROPIC_BASE_URL +
+    ANTHROPIC_AUTH_TOKEN         → Claude Code via OpenRouter or proxy
+  • OPENAI_API_KEY               → Codex
+  • codex --oss --local-provider → Codex via lmstudio / ollama for OSS models
 
-GeneratorAgent always uses the runner. Planner/evaluator/initializer also
-use the runner in orchestration_mode="runner"; in orchestration_mode="api"
-they call the Anthropic API directly for structured responses.
+This means there's exactly one execution model: a tool-using agent in a
+subprocess. Single-turn API calls without file I/O are not supported here.
+
+In orchestration_mode="runner" all four agents (planner, initializer,
+generator, evaluator) share the runner. In orchestration_mode="api" the
+planner/evaluator/initializer fall back to the Anthropic API for structured
+responses while the generator still uses the runner.
 """
 
 from abc import ABC, abstractmethod
@@ -38,16 +45,12 @@ class RunnerRateLimitedError(RuntimeError):
 
 
 class RunnerType(str, Enum):
-    # ── Agentic (subscription-based, full file I/O) ──────────────────────────
+    # All runners are agentic and use a coding-agent subscription (Pro/Max
+    # for Claude Code, OpenAI for Codex). Direct API providers plug into
+    # these via env vars — they are never their own runner.
     SUBPROCESS  = "subprocess"   # Claude Code CLI  — claude --print
     SDK         = "sdk"          # Claude Code SDK  — claude_code_sdk
     CODEX       = "codex"        # OpenAI Codex CLI — codex (CLI tool)
-
-    # ── API (pay-per-token, text output only) ────────────────────────────────
-    ANTHROPIC   = "anthropic"    # Anthropic API    — ANTHROPIC_API_KEY
-    OPENAI      = "openai"       # OpenAI API       — OPENAI_API_KEY
-    GEMINI      = "gemini"       # Google Gemini    — GEMINI_API_KEY
-    OPENROUTER  = "openrouter"   # OpenRouter       — OPENROUTER_API_KEY
 
     @classmethod
     def agentic(cls) -> list["RunnerType"]:
@@ -55,7 +58,13 @@ class RunnerType(str, Enum):
 
     @classmethod
     def api_based(cls) -> list["RunnerType"]:
-        return [cls.ANTHROPIC, cls.OPENAI, cls.GEMINI, cls.OPENROUTER]
+        """Always empty — kept so existing callers don't break.
+
+        API providers are no longer first-class runners; they plug into
+        the agentic runners via env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+        ANTHROPIC_BASE_URL, codex --oss --local-provider, etc.).
+        """
+        return []
 
     @classmethod
     def choices(cls) -> list[str]:
@@ -65,16 +74,14 @@ class RunnerType(str, Enum):
     def menu(cls) -> str:
         lines = [
             "",
-            "  ┌── AGENTIC runners (use your subscription, full file I/O) ──────────────┐",
-            "  │  subprocess  — Claude Code CLI     (claude subscription / Pro / Max)    │",
-            "  │  sdk         — Claude Code SDK     (claude subscription / Pro / Max)    │",
-            "  │  codex       — OpenAI Codex CLI    (openai subscription required)       │",
-            "  ├── API runners (pay-per-token, model outputs text only) ─────────────────┤",
-            "  │  anthropic   — Anthropic API        env: ANTHROPIC_API_KEY              │",
-            "  │  openai      — OpenAI API           env: OPENAI_API_KEY                 │",
-            "  │  gemini      — Google Gemini API    env: GEMINI_API_KEY                 │",
-            "  │  openrouter  — OpenRouter           env: OPENROUTER_API_KEY             │",
+            "  ┌── Coding-agent runners (subscription billing, full file I/O) ─────────┐",
+            "  │  subprocess  — Claude Code CLI     (Claude Pro / Max subscription)     │",
+            "  │  sdk         — Claude Code SDK     (Claude Pro / Max subscription)     │",
+            "  │  codex       — OpenAI Codex CLI    (OpenAI subscription)               │",
             "  └────────────────────────────────────────────────────────────────────────┘",
+            "",
+            "  API providers (Anthropic, OpenAI, Gemini, OpenRouter) plug into the",
+            "  three runners above via env vars rather than being separate runners.",
         ]
         return "\n".join(lines)
 

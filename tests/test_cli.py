@@ -34,9 +34,20 @@ def runner() -> CliRunner:
 def test_runners_command_lists_all(runner):
     result = runner.invoke(main, ["runners"])
     assert result.exit_code == 0, result.output
-    # All seven runners are listed in the menu
-    for name in ["subprocess", "sdk", "codex", "anthropic", "openai", "gemini", "openrouter"]:
+    # The three coding-agent runners — API providers no longer appear here
+    for name in ["subprocess", "sdk", "codex"]:
         assert name in result.output
+    for legacy in ["anthropic", "openai", "gemini", "openrouter"]:
+        assert legacy not in result.output
+
+
+def test_new_no_longer_accepts_api_runner_flags(runner):
+    """The four API-runner flags must be removed entirely."""
+    for flag in ["--anthropic-api", "--openai-api", "--gemini", "--openrouter"]:
+        result = runner.invoke(main, ["new", flag])
+        # Click emits a "no such option" usage error — exit code 2
+        assert result.exit_code != 0
+        assert "no such option" in result.output.lower() or "not a valid" in result.output.lower()
 
 
 # ── `harness new` flag parsing (no real run) ─────────────────────────────────
@@ -46,15 +57,6 @@ def test_new_rejects_multiple_runner_flags(runner):
     result = runner.invoke(main, ["new", "--claude-code", "--codex"])
     assert result.exit_code != 0
     assert "Only one runner flag" in result.output
-
-
-def test_new_api_mode_without_key_aborts_cleanly(runner, monkeypatch):
-    """API runners must require ANTHROPIC_API_KEY and abort with the friendly panel."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    result = runner.invoke(main, ["new", "--anthropic-api"])
-    # SystemExit(1) bubbles through Click as exit_code 1
-    assert result.exit_code == 1
-    assert "ANTHROPIC_API_KEY" in result.output
 
 
 def test_new_with_api_flag_on_subscription_runner_demands_key(runner, monkeypatch):

@@ -85,9 +85,12 @@ class HarnessConfig(BaseModel):
     orchestration_mode: Literal["api", "runner"] = "api"
 
     # ── Runner selection ────────────────────────────────────────────────────
-    # Which engine the GeneratorAgent uses to implement features.
+    # Which coding-agent the GeneratorAgent uses to implement features.
+    # Only the three agentic runners exist as first-class options. Direct
+    # API providers (Anthropic, OpenAI, Gemini, OpenRouter) plug into one
+    # of these via env vars — see the api_*_key fields below.
     # Leave as None to be prompted interactively at startup.
-    # Options: subprocess | sdk | codex | anthropic | openai | gemini | openrouter
+    # Options: subprocess | sdk | codex
     code_runner: Optional[str] = None
 
     # Model/provider knobs for agentic coding runtimes.
@@ -98,7 +101,17 @@ class HarnessConfig(BaseModel):
     codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
     code_runner_extra_args: list[str] = Field(default_factory=list)
 
-    # API keys for non-Anthropic providers (can also be set via env vars)
+    # API-provider keys. These do NOT spawn standalone runners. They are
+    # consumed by the three agentic runners as their underlying models:
+    #   • ANTHROPIC_API_KEY  →  Claude Code / SDK (default Anthropic auth)
+    #   • OPENAI_API_KEY     →  Codex
+    #   • GEMINI_API_KEY     →  reserved for future Codex multi-provider use
+    #   • OPENROUTER_API_KEY →  set ANTHROPIC_BASE_URL=https://openrouter.ai/...
+    #                          and ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
+    #                          to route Claude Code through OpenRouter.
+    # The harness does NOT auto-export these to the subprocess env — set them
+    # in your shell or use a tool like direnv. The fields exist so you can
+    # persist what a project expects in config.yaml as documentation.
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None

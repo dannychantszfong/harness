@@ -82,12 +82,19 @@ class Orchestrator:
     # Public entry point
     # ------------------------------------------------------------------
 
-    def run(self, confirmed_spec: str | None = None) -> None:
+    def run(
+        self,
+        confirmed_spec: str | None = None,
+        review_only: bool = False,
+    ) -> None:
         """Run the harness end-to-end.
 
         Args:
             confirmed_spec: A spec already agreed with the user (from `harness new`).
                             When provided the planner phase is skipped entirely.
+            review_only: Skip init/plan/loop and run the ReviewerAgent against
+                            the project directory. Used by `harness import`
+                            on repos that look done.
         """
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -98,6 +105,13 @@ class Orchestrator:
                 subtitle=self.config.brief[:80],
             )
         )
+
+        if review_only:
+            try:
+                self._review_only()
+            except RunnerRateLimitedError as exc:
+                self._handle_rate_limit(exc)
+            return
 
         try:
             # Phase 1: Initialize (idempotent — skips if already done)
@@ -119,6 +133,29 @@ class Orchestrator:
                 f"[bold green]Done![/bold green] "
                 f"{len(final.passing_features)}/{len(final.features)} features passing.",
                 title="Harness Complete",
+            )
+        )
+
+    def _review_only(self) -> None:
+        """Audit-only path: run ReviewerAgent, write REVIEW.md, exit clean."""
+        from harness.agents.reviewer import ReviewerAgent
+        console.print("\n[bold blue]Phase: Review[/bold blue]")
+        # Load progress if features.json exists; otherwise proceed without it.
+        progress = None
+        try:
+            progress = self.tracker.load()
+        except Exception:
+            pass
+
+        reviewer = ReviewerAgent(self.config, runner=self._agent_runner())
+        reviewer.review(progress=progress)
+
+        review_path = Path(self.config.output_dir) / "REVIEW.md"
+        console.print(
+            Panel(
+                f"[bold green]Review complete.[/bold green]\n"
+                f"Findings written to [bold]{review_path}[/bold]",
+                title="Harness Review",
             )
         )
 
