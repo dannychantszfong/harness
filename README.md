@@ -156,6 +156,22 @@ The runner status banner at startup always shows which mode is active:
 ╰───────────────────────────────────────────────────────────────────────╯
 ```
 
+### Quiet Progress Animation
+
+When the harness is waiting on a silent blocking step, it shows a small terminal pulse instead of looking frozen:
+
+```text
+✦ Claude Code is working
+✧ Claude Code is working
+✶ Claude Code is working
+```
+
+The animation runs only in interactive terminals and writes to stderr, so logs and piped output stay clean. Disable it with:
+
+```bash
+export HARNESS_NO_SPINNER=1
+```
+
 ---
 
 ## Starting a New Project

@@ -6,6 +6,7 @@ import anthropic
 from rich.console import Console
 
 from harness.config import HarnessConfig
+from harness.ui import QuietSpinner
 
 if TYPE_CHECKING:
     from harness.runners.base import CodeRunner
@@ -105,7 +106,8 @@ class BaseAgent(ABC):
             self.usage.update(final.usage)
             print()
         else:
-            resp = self.client.messages.create(**params)
+            with QuietSpinner(f"{self.role} is thinking"):
+                resp = self.client.messages.create(**params)
             self.usage.update(resp.usage)
             for block in resp.content:
                 if block.type == "text":

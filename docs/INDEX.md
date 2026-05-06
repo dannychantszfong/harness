@@ -76,6 +76,20 @@ The harness is centered on coding-agent runtimes, not raw model calls. Claude Co
 
 ---
 
+## Terminal Feel
+
+Silent waits use a lightweight pulse so the process feels alive without polluting logs:
+
+```text
+✦ Claude Code is working
+✧ Claude Code is working
+✶ Claude Code is working
+```
+
+Set `HARNESS_NO_SPINNER=1` to disable it.
+
+---
+
 ## Standard Loop Reference
 
 ```

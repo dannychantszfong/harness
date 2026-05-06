@@ -13,6 +13,7 @@ import shutil
 from rich.console import Console
 
 from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerType
+from harness.ui import QuietSpinner
 
 console = Console()
 
@@ -87,13 +88,14 @@ class CodexRunner(CodeRunner):
         cmd.append(prompt)
 
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-            )
+            with QuietSpinner("Codex is working"):
+                result = subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
         except subprocess.TimeoutExpired:
             return RunResult(
                 output="",
