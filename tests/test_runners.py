@@ -113,6 +113,25 @@ def test_subprocess_rate_limit_detected(tmp_config, monkeypatch):
     assert result.success is False
     assert result.rate_limit_reset_at is not None
     assert result.rate_limit_reset_at.tzinfo is not None  # always tz-aware UTC
+    assert result.rate_limited is True
+
+
+def test_subprocess_rate_limited_flag_without_reset_time(tmp_config, monkeypatch):
+    """A 429-style failure with no reset hint must still set rate_limited=True
+    so the orchestrator's role-fallback path triggers, even when we can't
+    schedule auto-resume."""
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    mock_result.stderr = "HTTP 429: too many requests, please slow down"
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+
+    runner = SubprocessRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is False
+    assert result.rate_limited is True
+    assert result.rate_limit_reset_at is None
 
 
 def test_subprocess_timeout(tmp_config, monkeypatch):
@@ -294,6 +313,50 @@ def test_sdk_runs_in_bypass_permissions_mode(tmp_config, monkeypatch):
         mock_sdk.ClaudeCodeOptions.call_args.kwargs["permission_mode"]
         == "bypassPermissions"
     )
+
+
+def test_sdk_rate_limit_sets_rate_limited_flag(tmp_config, monkeypatch):
+    """SDK exceptions matching the rate-limit hints must set rate_limited=True
+    so the orchestrator rotates profiles. reset_at may be None — that's fine,
+    rotation still triggers; only auto-resume scheduling needs reset_at."""
+    async def fake_query(*args, **kwargs):
+        if False:
+            yield None
+        raise RuntimeError("Anthropic API: 429 Too Many Requests — please slow down")
+
+    mock_sdk = MagicMock()
+    mock_sdk.query = fake_query
+    mock_sdk.ClaudeCodeOptions = MagicMock()
+    monkeypatch.setitem(sys.modules, "claude_code_sdk", mock_sdk)
+
+    runner = SDKRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is False
+    assert result.rate_limited is True
+    assert result.rate_limit_reset_at is None
+
+
+def test_sdk_rate_limit_parses_reset_time_when_present(tmp_config, monkeypatch):
+    """When a parseable reset hint happens to appear in the SDK error text,
+    SDK runner populates rate_limit_reset_at the same way subprocess does."""
+    async def fake_query(*args, **kwargs):
+        if False:
+            yield None
+        raise RuntimeError(
+            "claude_code_sdk: You've hit your limit · resets 9:30pm (Europe/London)"
+        )
+
+    mock_sdk = MagicMock()
+    mock_sdk.query = fake_query
+    mock_sdk.ClaudeCodeOptions = MagicMock()
+    monkeypatch.setitem(sys.modules, "claude_code_sdk", mock_sdk)
+
+    runner = SDKRunner(tmp_config)
+    result = runner.implement("prompt", cwd="/tmp")
+    assert result.success is False
+    assert result.rate_limited is True
+    assert result.rate_limit_reset_at is not None
+    assert result.rate_limit_reset_at.tzinfo is not None
 
 
 # ── CodexRunner ───────────────────────────────────────────────────────────────

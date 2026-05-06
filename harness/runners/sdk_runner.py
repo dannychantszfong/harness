@@ -14,22 +14,13 @@ tool call (Write, Bash, etc.) in real time and extract cost data.
 import asyncio
 from rich.console import Console
 
+from harness.runners._rate_limit import (
+    looks_rate_limited as _looks_rate_limited,
+    parse_reset_time as _parse_reset_time,
+)
 from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerType
 
 console = Console()
-
-_RATE_LIMIT_HINTS = (
-    "rate limit",
-    "usage limit",
-    "quota",
-    "too many requests",
-    "429",
-)
-
-
-def _looks_rate_limited(text: str) -> bool:
-    lowered = text.lower()
-    return any(hint in lowered for hint in _RATE_LIMIT_HINTS)
 
 
 def _check_sdk() -> tuple[bool, str]:
@@ -82,11 +73,14 @@ class SDKRunner(CodeRunner):
                 return asyncio.run(self._run_async(prompt, cwd, timeout_seconds))
         except Exception as exc:
             text = str(exc)
+            reset_at = _parse_reset_time(text)
+            rate_limited = reset_at is not None or _looks_rate_limited(text)
             return RunResult(
                 output="",
                 success=False,
                 error=text,
-                rate_limited=_looks_rate_limited(text),
+                rate_limit_reset_at=reset_at,
+                rate_limited=rate_limited,
             )
 
     async def _run_async(self, prompt: str, cwd: str, timeout_seconds: int) -> RunResult:

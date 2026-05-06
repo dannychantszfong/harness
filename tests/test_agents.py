@@ -134,6 +134,35 @@ def test_generator_raises_rate_limit_signal(runner_config):
     assert exc.value.reset_at == reset_at
 
 
+def test_generator_raises_rate_limit_when_only_flag_is_set(runner_config):
+    """SDK-style rate limit: rate_limited=True but rate_limit_reset_at=None.
+
+    Must still raise RunnerRateLimitedError so the orchestrator's role-fallback
+    rotates to the next profile. Without this contract the SDK runner would
+    silently fall through to a generic RuntimeError and rotation never fires.
+    """
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(
+        output="",
+        success=False,
+        error="HTTP 429: too many requests",
+        rate_limit_reset_at=None,
+        rate_limited=True,
+    )
+    agent = GeneratorAgent(runner_config, runner=runner)
+    feature = Feature(id="f1", name="Login", description="signup + login", priority=0)
+
+    with pytest.raises(RunnerRateLimitedError) as exc:
+        agent.implement_feature(
+            feature=feature,
+            progress=MagicMock(),
+            session_preamble="context",
+        )
+
+    assert exc.value.reset_at is None
+    assert "429" in exc.value.raw_message or "429" in str(exc.value)
+
+
 def test_generator_uses_configured_startup_command(runner_config):
     runner_config.startup_command = "npm run smoke"
     runner = MagicMock()
