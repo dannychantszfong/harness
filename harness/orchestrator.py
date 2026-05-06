@@ -56,6 +56,9 @@ class Orchestrator:
         "codex_oss",
         "codex_local_provider",
         "code_runner_extra_args",
+        "progress_animation",
+        "progress_phrase_style",
+        "progress_text_effect",
     )
 
     def __init__(self, config: HarnessConfig, runner_type: RunnerType | None = None) -> None:

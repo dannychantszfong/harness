@@ -158,13 +158,15 @@ The runner status banner at startup always shows which mode is active:
 
 ### Quiet Progress Animation
 
-When the harness is waiting on a silent blocking step, it shows a small terminal pulse instead of looking frozen:
+When the harness is waiting on a silent blocking step, it shows a small terminal pulse instead of looking frozen. The default uses rotating symbols plus short phrase transitions:
 
 ```text
-✦ Claude Code is working
-✧ Claude Code is working
-✶ Claude Code is working
+✧ C with Claude Code
+✦ Cooking with Claude Code
+✨ Cooking the sprint with Claude Code
 ```
+
+Built-in animation packs: `sparkle`, `bloom`, `snow`, `braille`, `orbit`, `pulse`, `dots`, `moon`, `bars`, `clock`, `wave`, `tech`.
 
 The animation runs only in interactive terminals and writes to stderr, so logs and piped output stay clean. Disable it with:
 
@@ -305,6 +307,11 @@ code_runner_model: "sonnet"
 codex_oss: false
 codex_local_provider: null       # ollama | lmstudio
 code_runner_extra_args: []       # advanced CLI escape hatch
+
+# Terminal progress animation for quiet waits
+progress_animation: "sparkle"    # sparkle | bloom | snow | braille | orbit | pulse | dots | moon | bars | clock | wave | tech
+progress_phrase_style: "playful" # playful | steady
+progress_text_effect: "typewriter" # none | typewriter | scramble
 
 # API keys for non-Anthropic runners (can also be set as env vars)
 openai_api_key: null      # or OPENAI_API_KEY

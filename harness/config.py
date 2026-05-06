@@ -56,6 +56,24 @@ class HarnessConfig(BaseModel):
     # job to re-run `harness resume` shortly after the reset time. macOS only.
     auto_resume_on_rate_limit: bool = True
 
+    # Terminal feel for quiet waits. These only render in interactive terminals.
+    progress_animation: Literal[
+        "sparkle",
+        "bloom",
+        "snow",
+        "braille",
+        "orbit",
+        "pulse",
+        "dots",
+        "moon",
+        "bars",
+        "clock",
+        "wave",
+        "tech",
+    ] = "sparkle"
+    progress_phrase_style: Literal["steady", "playful"] = "playful"
+    progress_text_effect: Literal["none", "typewriter", "scramble"] = "typewriter"
+
     # Unique project identifier — auto-generated when using `harness new`
     project_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:8])
 

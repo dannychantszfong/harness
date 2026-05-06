@@ -6,7 +6,7 @@ import anthropic
 from rich.console import Console
 
 from harness.config import HarnessConfig
-from harness.ui import QuietSpinner
+from harness.ui import QuietAnimator
 
 if TYPE_CHECKING:
     from harness.runners.base import CodeRunner
@@ -106,7 +106,15 @@ class BaseAgent(ABC):
             self.usage.update(final.usage)
             print()
         else:
-            with QuietSpinner(f"{self.role} is thinking"):
+            phase = {
+                "planner": "planning",
+                "evaluator": "evaluating",
+            }.get(self.role, "waiting")
+            with QuietAnimator.from_config(
+                self.config,
+                phase=phase,
+                subject=self.role,
+            ):
                 resp = self.client.messages.create(**params)
             self.usage.update(resp.usage)
             for block in resp.content:

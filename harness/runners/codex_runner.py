@@ -13,7 +13,7 @@ import shutil
 from rich.console import Console
 
 from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerType
-from harness.ui import QuietSpinner
+from harness.ui import QuietAnimator
 
 console = Console()
 
@@ -88,7 +88,7 @@ class CodexRunner(CodeRunner):
         cmd.append(prompt)
 
         try:
-            with QuietSpinner("Codex is working"):
+            with QuietAnimator.from_config(self.config, phase="coding", subject="Codex"):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,

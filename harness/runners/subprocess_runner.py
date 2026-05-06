@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 from rich.console import Console
 
 from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerType
-from harness.ui import QuietSpinner
+from harness.ui import QuietAnimator
 
 
 # Pattern observed from `claude --print`:
@@ -121,7 +121,7 @@ class SubprocessRunner(CodeRunner):
         cmd.append(prompt)
 
         try:
-            with QuietSpinner("Claude Code is working"):
+            with QuietAnimator.from_config(self.config, phase="coding", subject="Claude Code"):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,

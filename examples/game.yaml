@@ -22,3 +22,7 @@ evaluator_weights:
 
 sprint_contract_enabled: true
 context_reset_threshold_tokens: 150000
+
+progress_animation: "pulse"
+progress_phrase_style: "playful"
+progress_text_effect: "scramble"

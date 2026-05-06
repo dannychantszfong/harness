@@ -239,6 +239,11 @@ evaluator_weights:
 # ── Context management ───────────────────────────────────────────────────────
 context_reset_threshold_tokens: 150000
 sprint_contract_enabled: true
+
+# ── Terminal progress animation ──────────────────────────────────────────────
+progress_animation: "sparkle"       # sparkle | bloom | snow | braille | orbit | pulse | dots | moon | bars | clock | wave | tech
+progress_phrase_style: "playful"    # playful | steady
+progress_text_effect: "typewriter"  # none | typewriter | scramble
 ```
 
 ---
