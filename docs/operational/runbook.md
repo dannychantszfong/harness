@@ -16,21 +16,24 @@ conda activate harness
 # 2. Install core harness
 pip install -e .
 
-# 3. Install provider extras (install what you need)
-pip install -e ".[sdk]"           # Claude Code SDK runner
-pip install -e ".[openai]"        # OpenAI + OpenRouter runners
-pip install -e ".[gemini]"        # Google Gemini runner
-pip install -e ".[all-providers]" # Everything
+# 3. Install Claude Code SDK transport (optional)
+pip install -e ".[sdk]"
 
-# 4. Set API keys (only needed for your chosen mode/runners)
-export ANTHROPIC_API_KEY=sk-ant-...    # api orchestration or anthropic runner
-export OPENAI_API_KEY=sk-...           # openai runner
-export GEMINI_API_KEY=AIza...          # gemini runner
-export OPENROUTER_API_KEY=sk-or-...    # openrouter runner
+# 4. Install the coding-agent CLIs you intend to use:
+#    - Claude Code: https://claude.ai/download
+#    - Codex CLI:   https://github.com/openai/codex
 
-# 5. Verify
+# 5. Set env vars only for the mode you want
+export ANTHROPIC_API_KEY=sk-ant-...    # Claude API mode (or --with-api)
+export OPENAI_API_KEY=sk-...           # OpenAI API mode (Codex)
+export GEMINI_API_KEY=AIza...          # Gemini API mode
+# OpenRouter mode (route Claude Code through OpenRouter):
+export ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
+export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
+
+# 6. Verify
 harness --help
-harness runners   # confirm table prints cleanly
+harness runners   # confirm the three coding-agent rows print cleanly
 ```
 
 ---
@@ -54,10 +57,10 @@ ls output/my_project/
 # Step 4 — Check features
 harness status my_project.yaml
 
-# Step 5 — Run (pick a runner)
+# Step 5 — Run (pick a coding-agent runner)
 harness run my_project.yaml                        # interactive prompt
 harness run my_project.yaml --runner subprocess    # Claude Code CLI
-harness run my_project.yaml --runner openrouter    # OpenRouter
+harness run my_project.yaml --runner codex         # Codex CLI
 
 # Step 6 — Monitor (separate terminal)
 watch -n 10 "harness status my_project.yaml"
@@ -78,19 +81,22 @@ harness run my_project.yaml --runner subprocess
 ## Runner Quick Reference
 
 ```bash
-harness runners   # shows the full table with requirements
+harness runners   # shows the three coding-agent rows
 
-# Agentic (uses subscription — no API billing)
-harness run config.yaml -r subprocess   # needs: claude CLI installed
-harness run config.yaml -r sdk          # needs: pip install -e ".[sdk]"
-harness run config.yaml -r codex        # needs: codex CLI installed
-harness run config.yaml -r codex --model gpt-5.2
+# Pick a coding agent (the runner)
+harness run config.yaml -r subprocess   # Claude Code CLI
+harness run config.yaml -r sdk          # Claude Code SDK
+harness run config.yaml -r codex        # Codex CLI
 
-# API (pay-per-token)
-harness run config.yaml -r anthropic    # needs: ANTHROPIC_API_KEY
-harness run config.yaml -r openai       # needs: OPENAI_API_KEY + pip install -e ".[openai]"
-harness run config.yaml -r gemini       # needs: GEMINI_API_KEY + pip install -e ".[gemini]"
-harness run config.yaml -r openrouter   # needs: OPENROUTER_API_KEY + pip install -e ".[openai]"
+# Then pick the auth/billing mode by setting env vars BEFORE the run:
+#
+#   Mode 1 — Claude subscription      : (no env vars; you're signed into Claude Code)
+#   Mode 2 — Claude API               : ANTHROPIC_API_KEY=sk-ant-...
+#   Mode 3 — Codex subscription       : (no env vars; you're signed into Codex)
+#   Mode 4 — OpenAI API               : OPENAI_API_KEY=sk-...
+#   Mode 5 — Gemini API               : GEMINI_API_KEY=AIza...  (custom provider)
+#   Mode 6 — OpenRouter API           : ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
+#                                       ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
 ```
 
 ---
@@ -154,35 +160,46 @@ pip install -e ".[sdk]"
 
 ---
 
-### INC-06: `openai` / `openrouter` runner — `openai package not installed`
-**Fix:**
-```bash
-pip install -e ".[openai]"
-```
-
----
-
-### INC-07: `gemini` runner — `google-generativeai not installed`
-**Fix:**
-```bash
-pip install -e ".[gemini]"
-```
-
----
-
-### INC-08: API runner — `API key not set`
-**Cause:** The required environment variable is missing  
-**Fix:**
-```bash
-# Match the key to your runner:
-export ANTHROPIC_API_KEY=sk-ant-...    # anthropic
-export OPENAI_API_KEY=sk-...           # openai
-export GEMINI_API_KEY=AIza...          # gemini
-export OPENROUTER_API_KEY=sk-or-...    # openrouter
-```
-Or add it to your YAML config (use env vars for secrets in production):
+### INC-06: Migrating an old config that references a removed API runner
+**Symptom:** `harness resume` errors with `Unknown runner type: 'anthropic'` (or `openai`/`gemini`/`openrouter`)
+**Cause:** Standalone API runners were removed; pick a coding-agent runner and set the matching env var
+**Fix:** edit `config.yaml`:
 ```yaml
-openai_api_key: "sk-..."
+code_runner: subprocess        # was: anthropic   → use Claude Code with ANTHROPIC_API_KEY
+# code_runner: codex           # was: openai      → use Codex with OPENAI_API_KEY
+# code_runner: subprocess      # was: openrouter  → use Claude Code with ANTHROPIC_BASE_URL routing
+```
+
+Then export the right env vars in your shell before `harness resume`.
+
+---
+
+### INC-07: Coding-agent runner — required env var missing
+**Cause:** You picked a non-subscription mode (Claude API / OpenAI API / OpenRouter / Gemini) but the env var Claude Code or Codex needs isn't set
+**Fix:**
+```bash
+# Mode 2 — Claude API
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Mode 4 — OpenAI API
+export OPENAI_API_KEY=sk-...
+
+# Mode 6 — OpenRouter API (route Claude Code through OpenRouter)
+export ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
+export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
+```
+
+The harness does NOT auto-export from `config.yaml` — set the env vars in your shell.
+
+---
+
+### INC-08: Subscription rate limit hit mid-run
+**Symptom:** Rich panel "Paused — rate limit" with a reset time; orchestrator exits cleanly
+**Cause:** Claude Code (Pro/Max) or Codex (Plus) usage cap reached
+**Fix:** If `auto_resume_on_rate_limit: true` (default), a launchd job is scheduled for shortly after the reset. Otherwise:
+```bash
+# wait until the reset time, then:
+harness resume output/<project_dir>
 ```
 
 ---
@@ -208,7 +225,7 @@ context_reset_threshold_tokens: 180000  # max ~195k for Opus 4.7
 ---
 
 ### INC-11: Anthropic API 529 Overloaded
-**Cause:** API is at capacity (affects Planner, Evaluator, and `anthropic` runner)  
+**Cause:** Anthropic API at capacity (affects Planner+Evaluator only when `orchestration_mode='api'`)
 **Fix:** The Anthropic SDK retries automatically. If retries exhaust, wait 30–60s and re-run — progress is preserved.
 
 ---

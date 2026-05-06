@@ -31,14 +31,15 @@ The Claude Agent Harness is a Python orchestration framework that drives multipl
 └──────┬──────┘ └─────┬──────┘ └───┬────────┘ └──────┬──────────┘
        │              │             │                  │
 ┌──────▼──────────────▼─────────────▼──────────────────▼─────────┐
-│  Runner Layer   harness/runners/                                 │
+│  Runner Layer   harness/runners/  (3 coding-agent transports)    │
 │                                                                  │
-│  Agentic (subscription)    │  API (pay-per-token)                │
-│  ┌────────────┐            │  ┌────────────┐ ┌────────────┐     │
-│  │ subprocess │            │  │ anthropic  │ │  openai    │     │
-│  │ sdk        │            │  │ gemini     │ │ openrouter │     │
-│  │ codex      │            │  └────────────┘ └────────────┘     │
-│  └────────────┘            │                                     │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐                  │
+│  │ subprocess │  │    sdk     │  │   codex    │                  │
+│  │ Claude CLI │  │ Claude SDK │  │ Codex CLI  │                  │
+│  └────────────┘  └────────────┘  └────────────┘                  │
+│                                                                  │
+│  API providers (Anthropic / OpenAI / Gemini / OpenRouter) plug    │
+│  into one of the three above via env vars; no separate runners.  │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────────────┐
@@ -65,9 +66,11 @@ Unchanged from v1.0 except:
 
 ---
 
-### 3.2 Runner Layer (`harness/runners/`) ← new in v2.0
+### 3.2 Runner Layer (`harness/runners/`) ← rewritten in v2.1
 
 The runner is the only component that talks to an external execution environment. Everything else in the harness is provider-agnostic.
+
+The harness supports **two coding agents** behind **six billing/auth modes**. Direct API providers are not standalone runners — they plug into Claude Code or Codex as the underlying model.
 
 #### `CodeRunner` (abstract base)
 
@@ -81,29 +84,29 @@ All runners implement this single method. `RunResult` carries:
 - `output: str` — the agent's final self-evaluation text
 - `success: bool`
 - `error: str | None`
-- `input_tokens / output_tokens / cost_usd` — populated by API runners, `None` for agentic
+- `rate_limit_reset_at: datetime | None` — set when a subscription cap is hit
+- `input_tokens / output_tokens / cost_usd` — populated when the runner exposes them (SDK), `None` otherwise
 
 #### `RunnerType` enum
 
 ```
-SUBPROCESS  — subprocess_runner.py  — claude --print
-SDK         — sdk_runner.py         — claude_code_sdk.query()
-CODEX       — codex_runner.py       — codex --approval-mode full-auto
-ANTHROPIC   — api_runner.py         — Anthropic messages API
-OPENAI      — openai_api_runner.py  — OpenAI chat completions
-GEMINI      — gemini_api_runner.py  — Google GenerativeAI
-OPENROUTER  — openrouter_api_runner.py — OpenAI-compatible proxy
+SUBPROCESS  — subprocess_runner.py  — claude --print           (Claude Code CLI)
+SDK         — sdk_runner.py         — claude_code_sdk.query()  (Claude Code SDK)
+CODEX       — codex_runner.py       — codex exec               (Codex CLI)
 ```
 
-#### Agentic vs API runners
+#### Six modes mapped to two agents
 
-| Dimension | Agentic | API |
-|-----------|---------|-----|
-| File I/O | Direct (writes to disk) | None (text output only) |
-| Billing | Subscription included | Per token |
-| Token data | Not available | Returned in RunResult |
-| Real-world use | Production builds | Testing / prototyping |
-| Context | Full tool use loop | Single-turn call |
+| # | Mode | Agent | Auth source |
+|---|---|---|---|
+| 1 | Claude subscription | Claude Code (subprocess / sdk) | Pro/Max plan |
+| 2 | Claude API | Claude Code | `ANTHROPIC_API_KEY` |
+| 3 | Codex subscription | Codex | OpenAI Plus plan |
+| 4 | OpenAI API | Codex | `OPENAI_API_KEY` |
+| 5 | Gemini API | Codex (custom provider) or Claude Code (via OpenRouter) | `GEMINI_API_KEY` |
+| 6 | OpenRouter API | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` |
+
+All six modes go through the same `CodeRunner` interface, so the orchestrator never branches on billing model.
 
 ---
 
@@ -167,9 +170,16 @@ conda activate harness
 # Core install
 pip install -e .
 
-# Optional provider extras
-pip install -e ".[sdk]"           # Claude Code SDK
-pip install -e ".[openai]"        # OpenAI + OpenRouter
-pip install -e ".[gemini]"        # Google Gemini
-pip install -e ".[all-providers]" # Everything
+# Optional extras
+pip install -e ".[sdk]"           # Claude Code SDK transport
+```
+
+External binaries (install separately, not via pip):
+
+```bash
+# Claude Code CLI — required for the subprocess runner
+#   https://claude.ai/download
+
+# Codex CLI — required for the codex runner
+#   https://github.com/openai/codex
 ```

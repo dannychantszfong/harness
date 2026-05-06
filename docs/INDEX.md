@@ -52,7 +52,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 
 | File | Description |
 |------|-------------|
-| [test_plan.md](testing/test_plan.md) | Strategy, 45+ test cases by component (incl. all 7 runners) |
+| [test_plan.md](testing/test_plan.md) | Strategy, test cases by component (incl. the 3 coding-agent runners) |
 | [test_cases.md](testing/test_cases.md) | Step-by-step specs for runner factory, subprocess, SDK, API, generator integration |
 
 ---
@@ -106,10 +106,11 @@ Sprint Contract
   ┌─ GAN Loop ─────────────────────────────────────────────────────────────┐
   │                                                                         │
   │  Generator: build prompt → delegate to CodeRunner.implement()           │
-  │    ├─ Agentic runner (subprocess/sdk/codex):                            │
-  │    │    writes files · runs bash · git commit · subscription billing    │
-  │    └─ API runner (anthropic/openai/gemini/openrouter):                  │
-  │         streams text · token tracking · cost estimate · no file I/O     │
+  │    └─ One of three coding-agent runners                                  │
+  │       (subprocess = Claude Code CLI, sdk = Claude Code SDK,              │
+  │        codex = Codex CLI). All write files, run bash, commit git.        │
+  │       API providers (Anthropic / OpenAI / Gemini / OpenRouter)           │
+  │       plug into the agent above via env vars, not as separate runners.   │
   │                  ↓ self-eval text                                        │
   │  Evaluator: grade (design/orig/craft/fn) → structured score (tool use) │
   │                  ↓                                                       │

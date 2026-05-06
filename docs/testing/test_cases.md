@@ -21,14 +21,17 @@ from harness.runners.sdk_runner import SDKRunner
     (RunnerType.SUBPROCESS,  SubprocessRunner),
     (RunnerType.SDK,         SDKRunner),
     (RunnerType.CODEX,       CodexRunner),
-    (RunnerType.ANTHROPIC,   APIRunner),
-    (RunnerType.OPENAI,      OpenAIAPIRunner),
-    (RunnerType.GEMINI,      GeminiAPIRunner),
-    (RunnerType.OPENROUTER,  OpenRouterAPIRunner),
 ])
 def test_create_runner_returns_correct_type(runner_type, expected_cls, tmp_config):
     runner = create_runner(runner_type, tmp_config)
     assert isinstance(runner, expected_cls)
+
+
+def test_runner_type_api_based_is_empty_after_refactor():
+    """API providers are no longer standalone runners — they plug into
+    the three coding-agent runners via env vars. The api_based() method
+    is preserved (returns []) so existing callers don't crash."""
+    assert RunnerType.api_based() == []
 ```
 
 ---
@@ -133,67 +136,58 @@ def test_sdk_missing_package(tmp_config, monkeypatch):
 
 ---
 
-## API Runner Tests
+## Rate-Limit Detection Tests (subscription modes)
 
-### AR-01: Missing API key returns actionable error
+### RL-01: Stdout signature populates rate_limit_reset_at
 
 ```python
-@pytest.mark.parametrize("runner_cls,key_env,key_name", [
-    (OpenAIAPIRunner,      "OPENAI_API_KEY",      "OPENAI_API_KEY"),
-    (GeminiAPIRunner,      "GEMINI_API_KEY",       "GEMINI_API_KEY"),
-    (OpenRouterAPIRunner,  "OPENROUTER_API_KEY",   "OPENROUTER_API_KEY"),
-])
-def test_api_runner_missing_key(runner_cls, key_env, key_name, tmp_config, monkeypatch):
-    monkeypatch.delenv(key_env, raising=False)
-    tmp_config.openai_api_key = None
-    tmp_config.gemini_api_key = None
-    tmp_config.openrouter_api_key = None
+def test_subprocess_rate_limit_detected(tmp_config, monkeypatch):
+    """A 'You've hit your limit · resets …' message must be parsed into
+    rate_limit_reset_at (tz-aware UTC datetime)."""
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = "You've hit your limit · resets 9:30pm (Europe/London)"
+    mock_result.stderr = ""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
 
-    runner = runner_cls(tmp_config)
+    runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
     assert result.success is False
-    assert key_name in result.error
+    assert result.rate_limit_reset_at is not None
+    assert result.rate_limit_reset_at.tzinfo is not None  # always tz-aware UTC
 ```
 
 ---
 
-### AR-02: Missing provider package returns pip install error
+### RL-05: agents/base raises RunnerRateLimitedError, not RuntimeError
 
 ```python
-def test_openai_runner_missing_package(tmp_config, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
-    monkeypatch.setitem(sys.modules, "openai", None)
+def test_call_via_runner_raises_typed_exception_on_rate_limit(tmp_config):
+    from datetime import datetime, timezone
+    from harness.runners.base import RunnerRateLimitedError
 
-    runner = OpenAIAPIRunner(tmp_config)
-    result = runner.implement("prompt", cwd="/tmp")
-    assert result.success is False
-    assert "pip install openai" in result.error
+    fake_runner = MagicMock()
+    fake_runner.implement.return_value = RunResult(
+        output="", success=False, error="hit limit",
+        rate_limit_reset_at=datetime.now(timezone.utc),
+    )
+    agent = SomeAgent(tmp_config, runner=fake_runner)
+    with pytest.raises(RunnerRateLimitedError):
+        agent._call_via_runner("prompt")
 ```
 
 ---
 
-### AR-03 / AR-04: Successful call returns tokens and cost
+### RL-06: Orchestrator handles rate limit gracefully
 
-```python
-def test_anthropic_runner_returns_tokens(tmp_config, monkeypatch):
-    mock_stream = MagicMock()
-    mock_stream.__enter__ = lambda s: s
-    mock_stream.__exit__ = MagicMock(return_value=False)
-    mock_stream.text_stream = iter(["hello ", "world"])
-    mock_usage = MagicMock(input_tokens=1000, output_tokens=500)
-    mock_stream.get_final_message.return_value = MagicMock(usage=mock_usage)
-    
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
-    with patch("anthropic.Anthropic") as MockClient:
-        MockClient.return_value.messages.stream.return_value = mock_stream
-        runner = APIRunner(tmp_config)
-        result = runner.implement("prompt", cwd="/tmp")
-
-    assert result.success is True
-    assert result.input_tokens == 1000
-    assert result.output_tokens == 500
-    assert result.cost_usd is not None and result.cost_usd > 0
-```
+See [tests/test_auto_resume.py](../../tests/test_auto_resume.py) — the
+end-to-end test asserts that:
+1. `Orchestrator.run()` does NOT raise when a `RunnerRateLimitedError` is
+   raised by an agent
+2. A launchd plist is written to `~/Library/LaunchAgents/`
+3. The wrapper script is executable
+4. `auto_resume.cancel(project_id)` removes the plist
 
 ---
 
@@ -242,16 +236,20 @@ def test_sprint_contract_uses_api_not_runner(tmp_config, one_feature_progress):
 
 ---
 
-## Regression Checklist (v2.0 additions)
+## Regression Checklist (v2.1 additions)
 
 Before each release, verify:
 
-- [ ] `harness runners` prints the full table without error
+- [ ] `harness runners` prints the three coding-agent rows without error
 - [ ] `harness run config.yaml --runner subprocess` skips the prompt
-- [ ] `harness run config.yaml --runner openrouter` uses OPENROUTER_API_KEY
-- [ ] Missing binary for agentic runner shows clear install instructions
-- [ ] Missing API key for API runner shows correct env var name
+- [ ] Mode 6 (OpenRouter via Claude Code) works with `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`
+- [ ] Missing binary for any of the three runners shows clear install instructions
+- [ ] Missing env var for the chosen mode shows actionable guidance
 - [ ] `code_runner: sdk` in YAML skips the interactive prompt
+- [ ] Subscription rate-limit hit surfaces the friendly panel (no traceback)
+- [ ] `auto_resume_on_rate_limit: true` (default) writes a launchd plist
+- [ ] Old configs with `code_runner: anthropic|openai|gemini|openrouter` raise the migration error in INC-06
+- [ ] `harness import <repo>` correctly detects stage and routes to review-only when ≥80% features pass
 - [ ] Switching runner mid-project (config change) resumes from last state
 - [ ] `ANTHROPIC_API_KEY` is required for api orchestration, but not runner orchestration
 - [ ] `--model` is persisted as `code_runner_model` for Claude Code/Codex runners

@@ -13,22 +13,26 @@ conda create -n harness python=3.12 -y
 conda activate harness
 
 # 2. Install harness + extras
-pip install -e .                    # core (Anthropic API always included)
-pip install -e ".[sdk]"            # Claude Code SDK runner
-pip install -e ".[openai]"         # OpenAI + OpenRouter runners
-pip install -e ".[gemini]"         # Google Gemini runner
-pip install -e ".[dev]"            # pytest, pytest-asyncio, pytest-mock
+pip install -e .                    # core
+pip install -e ".[sdk]"             # Claude Code SDK transport (optional)
+pip install -e ".[dev]"             # pytest, pytest-asyncio, pytest-mock
 
-# 3. Set API keys
-export ANTHROPIC_API_KEY=sk-ant-...   # api orchestration or anthropic runner
-export OPENAI_API_KEY=sk-...          # if using openai / openrouter runner
-export GEMINI_API_KEY=AIza...         # if using gemini runner
-export OPENROUTER_API_KEY=sk-or-...   # if using openrouter runner
+# 3. Install one or both coding-agent CLIs:
+#    Claude Code: https://claude.ai/download
+#    Codex:       https://github.com/openai/codex
 
-# 4. Run tests (no API keys needed — mocked)
+# 4. Set env vars only for the mode you intend to use
+export ANTHROPIC_API_KEY=sk-ant-...   # Mode 2 (Claude API), or --with-api split
+export OPENAI_API_KEY=sk-...          # Mode 4 (OpenAI API via Codex)
+export GEMINI_API_KEY=AIza...         # Mode 5 (Gemini, via routing)
+# Mode 6 (OpenRouter via Claude Code):
+export ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
+export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
+
+# 5. Run tests (no live API/CLI calls — mocked)
 pytest tests/ -v
 
-# 5. Run against an example
+# 6. Run against an example
 harness run examples/web_app.yaml --runner subprocess
 ```
 
@@ -36,14 +40,15 @@ harness run examples/web_app.yaml --runner subprocess
 
 ## Environment Variables Reference
 
-| Variable | Required | Used by |
-|----------|----------|---------|
-| `ANTHROPIC_API_KEY` | `orchestration_mode: api` or `anthropic` runner | Planner, Evaluator, `anthropic` runner |
-| `OPENAI_API_KEY` | If using `openai` or `openrouter` runner | `openai_api_runner.py`, `openrouter_api_runner.py` |
-| `GEMINI_API_KEY` | If using `gemini` runner | `gemini_api_runner.py` |
-| `OPENROUTER_API_KEY` | If using `openrouter` runner | `openrouter_api_runner.py` |
+| Variable | Mode | Description |
+|----------|------|-------------|
+| *(none)* | Modes 1, 3 (subscriptions) | Claude Code or Codex auths via your signed-in plan |
+| `ANTHROPIC_API_KEY` | Mode 2 (Claude API) | Pay-per-token Claude Code via Anthropic API; also required for `orchestration_mode='api'` planner+evaluator |
+| `OPENAI_API_KEY` | Mode 4 (OpenAI API) | Pay-per-token Codex via OpenAI API |
+| `GEMINI_API_KEY` | Mode 5 (Gemini API) | Routed via Codex custom provider or via OpenRouter through Claude Code |
+| `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | Mode 6 (OpenRouter) | Point Claude Code at OpenRouter; token = `OPENROUTER_API_KEY` |
 
-> **Note:** In `runner` mode, subscription runtimes such as Claude Code and Codex can drive planner, evaluator, and generator without `ANTHROPIC_API_KEY`.
+> **Note:** Modes 1 and 3 (subscriptions) need no API keys at all. The harness does not auto-export the env vars above — set them in your shell or `direnv`.
 
 ---
 
@@ -54,10 +59,6 @@ harness run examples/web_app.yaml --runner subprocess
 | `subprocess` | [Download Claude Code](https://claude.ai/download) | `which claude` |
 | `sdk` | `pip install -e ".[sdk]"` | `python -c "import claude_code_sdk"` |
 | `codex` | `npm install -g @openai/codex` | `which codex` |
-| `anthropic` | included in base install | — |
-| `openai` | `pip install -e ".[openai]"` | `python -c "import openai"` |
-| `gemini` | `pip install -e ".[gemini]"` | `python -c "import google.generativeai"` |
-| `openrouter` | `pip install -e ".[openai]"` | `python -c "import openai"` |
 
 ---
 
@@ -70,12 +71,15 @@ WORKDIR /app
 COPY . .
 
 RUN conda create -n harness python=3.12 -y && \
-    conda run -n harness pip install -e ".[all-providers]"
+    conda run -n harness pip install -e ".[sdk]"
+
+# Install Claude Code CLI (or Codex CLI) inside the image — see
+# https://claude.ai/download or https://github.com/openai/codex.
 
 ENV ANTHROPIC_API_KEY=""
 ENV OPENAI_API_KEY=""
-ENV GEMINI_API_KEY=""
-ENV OPENROUTER_API_KEY=""
+ENV ANTHROPIC_BASE_URL=""
+ENV ANTHROPIC_AUTH_TOKEN=""
 
 ENTRYPOINT ["conda", "run", "-n", "harness", "harness"]
 CMD ["--help"]
@@ -86,29 +90,27 @@ docker build -t claude-harness .
 
 docker run \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/my_project.yaml:/app/my_project.yaml \
-  claude-harness run /app/my_project.yaml --runner openai
+  claude-harness run /app/my_project.yaml --runner subprocess
 ```
 
-> **Note:** Agentic runners (`subprocess`, `sdk`, `codex`) require the respective CLI binary inside the container. For Docker deployments, API runners are easier.
+> **Note:** All three runners require their coding-agent CLI inside the container. Subscription mode requires the user to be signed in to that CLI inside the image; for headless deployments, prefer Mode 2 (`ANTHROPIC_API_KEY`) or Mode 4 (`OPENAI_API_KEY`).
 
 ---
 
-## Cost Planning by Runner
+## Cost Planning by Mode
 
-| Runner | Cost model | Typical cost per feature (5 iterations) |
+| Mode | Cost model | Typical cost per feature (5 iterations) |
 |--------|-----------|----------------------------------------|
-| `subprocess` | Subscription included | ~$0 extra |
-| `sdk` | Subscription included | ~$0 extra |
-| `codex` | OpenAI subscription included | ~$0 extra |
-| `anthropic` | ~$15/$75 per 1M in/out (Opus 4.7) | ~$3–8 |
-| `openai` | ~$5/$15 per 1M in/out (GPT-4o) | ~$1–4 |
-| `gemini` | ~$1.25/$10 per 1M in/out (2.5 Pro) | ~$0.5–2 |
-| `openrouter` | model-dependent | varies |
+| 1 — Claude subscription | Pro / Max plan | ~$0 extra (counts against plan quota) |
+| 3 — Codex subscription | OpenAI Plus | ~$0 extra (counts against plan quota) |
+| 2 — Claude API | ~$15/$75 per 1M in/out (Opus 4.7) | ~$3–8 |
+| 4 — OpenAI API | ~$5/$15 per 1M in/out (GPT-4o-class) | ~$1–4 |
+| 5 — Gemini API | ~$1.25/$10 per 1M in/out (2.5 Pro) | ~$0.5–2 |
+| 6 — OpenRouter API | Model-dependent | Varies |
 
-> In `api` orchestration mode, planner/evaluator bill to `ANTHROPIC_API_KEY`. In `runner` mode, that overhead stays inside the selected subscription coding-agent runtime.
+> In `api` orchestration mode (`--with-api`), planner/evaluator additionally bill to `ANTHROPIC_API_KEY`. In default `runner` mode, that overhead stays inside whichever mode the generator is using.
 
 ---
 
@@ -146,7 +148,7 @@ output/my_project/
 └── ...
 ```
 
-> API runners produce text output only — `src/` will not be populated unless you manually apply the generated code.
+> All three runners produce real files in `src/` — they each drive a tool-using coding agent that writes to disk.
 
 ---
 
@@ -155,9 +157,14 @@ output/my_project/
 ```bash
 conda activate harness
 git pull
-pip install -e ".[all-providers]"
+pip install -e ".[sdk]"  # if you use the SDK transport
 
 # Existing features.json files remain compatible unless a Pydantic model field
 # was renamed. Check harness/progress/models.py changelog before upgrading
 # mid-project.
+#
+# Migrating from pre-2.1 configs: if config.yaml has
+# code_runner: anthropic|openai|gemini|openrouter, switch to one of the
+# three coding-agent runners (subprocess/sdk/codex) and set the matching
+# env var. See INC-06 in the runbook.
 ```

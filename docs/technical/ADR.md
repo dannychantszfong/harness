@@ -63,44 +63,54 @@ The initial harness called the Anthropic API directly from `GeneratorAgent`. Thi
 2. Users on other providers (OpenAI, Gemini) couldn't use the harness at all
 
 ### Decision
-Extract all execution logic into a `CodeRunner` abstract class with a single interface (`implement(prompt, cwd) → RunResult`). Implement 7 concrete runners across two families (agentic, API).
+Extract all execution logic into a `CodeRunner` abstract class with a single interface (`implement(prompt, cwd) → RunResult`). Implement runners only for **coding agents** (Claude Code CLI, Claude Code SDK, Codex CLI). Direct API providers are not standalone runners — they plug in as the *model* behind one of the agents.
 
 ### Rationale
 - Single interface keeps the orchestrator completely provider-agnostic
-- Agentic runners (subprocess/sdk/codex) use subscriptions — zero extra cost for existing subscribers
-- API runners (anthropic/openai/gemini/openrouter) provide pay-per-token alternatives with cost tracking
+- Coding agents (Claude Code, Codex) provide the harness's actual value: tool use, file I/O, shell, git workflow. A single-turn API call cannot match this.
+- Two agents × six auth modes (subscription / Anthropic API / OpenAI API / Gemini / OpenRouter / etc.) cover the realistic deployment matrix without bloating the runner count.
 - Runner swap requires only a config change or CLI flag — no code changes
 
 ### Consequences
 - `GeneratorAgent` constructor now requires a `CodeRunner` instance
 - `Orchestrator` resolves runner at startup and injects it
 - Sprint contract negotiation remains on the Anthropic API (it's a structured tool call, not an agentic task — no file I/O needed)
-- Token/cost data is `None` for agentic runners (subscription pricing is opaque)
+- Token/cost data is `None` for agentic transports that don't surface per-call usage (the SDK transport does expose tokens via streaming)
 
 ---
 
-## ADR-008: Agentic Runners Use Subscription; API Runners Pay Per Token
+## ADR-008: Two Coding Agents, Six Modes (revised 2026-05-06)
 
-**Status:** Accepted  
-**Date:** 2026-05-03  
+**Status:** Accepted (revises 2026-05-03)
+**Date:** 2026-05-06
 
 ### Context
-Users asked whether they could use their Claude subscription instead of paying API fees. The answer depends on *how* the harness calls the model.
+The earlier design exposed direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) as their own first-class runners. In practice, that gave users an inferior single-turn experience for the same money — no file I/O, no tool use, no agentic behavior. The harness's value comes from running on top of a real coding agent.
 
 ### Decision
-Split runners into two families:
-- **Agentic** (subprocess, sdk, codex): invoke the CLI or SDK, which authenticates via the user's subscription login. No `API_KEY` required.
-- **API** (anthropic, openai, gemini, openrouter): call the provider's HTTP API directly. Require an `API_KEY`. Billed per token.
+The harness recognizes exactly **two coding agents** and **six modes**:
+
+| # | Mode | Agent | Auth source |
+|---|---|---|---|
+| 1 | Claude subscription | Claude Code (subprocess / sdk) | Pro/Max plan |
+| 2 | Claude API | Claude Code | `ANTHROPIC_API_KEY` |
+| 3 | Codex subscription | Codex | OpenAI Plus plan |
+| 4 | OpenAI API | Codex | `OPENAI_API_KEY` |
+| 5 | Gemini API | Codex (custom provider) or Claude Code (via OpenRouter) | `GEMINI_API_KEY` |
+| 6 | OpenRouter API | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` |
+
+The four standalone API runners are removed. API keys flow into the three coding-agent runners via env vars.
 
 ### Rationale
-- Running `claude --print` is identical to typing in the terminal — uses subscription
-- Running `anthropic.Anthropic().messages.create()` hits the API — billed per token
-- These are fundamentally different billing surfaces that the user must opt into knowingly
+- Running `claude --print` (or the SDK) is the same agent regardless of how the model is paid for — picking a billing source is orthogonal to picking the agent
+- Removing the four runners eliminates ~600 lines of pay-per-token API code that duplicated what Claude Code / Codex already do better
+- Users keep every previously-supported provider; they just access it through a tool-using agent shell instead of as a single-turn text generator
 
 ### Consequences
-- `harness runners` and the interactive prompt explicitly show "Claude subscription" vs "pay-per-token"
-- Token/cost data is unavailable for agentic runners (no per-token visibility in subscription billing)
-- Agentic runners have full file I/O; API runners produce text only
+- `harness runners` and the interactive picker show only the three coding-agent options
+- The four named CLI flags (`--anthropic-api`, `--openai-api`, `--gemini`, `--openrouter`) are removed; users select the agent (`--claude-code` / `--claude-sdk` / `--codex`) and set the matching env var
+- `RunnerType.api_based()` returns `[]` (kept as a method so callers don't break)
+- Existing project configs that reference removed runner values must migrate — `harness import` / `harness resume` surface a clear error
 
 ---
 

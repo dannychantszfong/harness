@@ -34,12 +34,13 @@ pytest tests/ -v
 - SessionOpener context block generation
 - Orchestrator phase sequencing, GAN loop count, max-iteration guard
 - HarnessConfig YAML loading and weight validation
-- **All 7 runners** — error paths (missing binary, missing key, missing package)
+- **All 3 coding-agent runners** — error paths (missing binary, missing package)
 - Runner factory (`create_runner`) with each `RunnerType`
-- `RunResult` fields are correctly populated for API runners
-- `SubprocessRunner` — timeout, non-zero exit code, binary not found
-- `SDKRunner` — import error handling
-- `OpenRouterAPIRunner` — missing key, missing openai package
+- `RunResult` fields are correctly populated when the runner exposes them (SDK transport)
+- `RunResult.rate_limit_reset_at` is set when a subscription cap is hit
+- `SubprocessRunner` — timeout, non-zero exit, binary not found, rate-limit detection
+- `SDKRunner` — import error handling, model passthrough
+- `CodexRunner` — local-provider routing flags
 
 ### Out of Scope
 - Quality of LLM outputs (non-deterministic)
@@ -75,11 +76,9 @@ pytest tests/ -v
 | RF-01 | `create_runner(RunnerType.SUBPROCESS, config)` returns `SubprocessRunner` | Correct type |
 | RF-02 | `create_runner(RunnerType.SDK, config)` returns `SDKRunner` | Correct type |
 | RF-03 | `create_runner(RunnerType.CODEX, config)` returns `CodexRunner` | Correct type |
-| RF-04 | `create_runner(RunnerType.ANTHROPIC, config)` returns `APIRunner` | Correct type |
-| RF-05 | `create_runner(RunnerType.OPENAI, config)` returns `OpenAIAPIRunner` | Correct type |
-| RF-06 | `create_runner(RunnerType.GEMINI, config)` returns `GeminiAPIRunner` | Correct type |
-| RF-07 | `create_runner(RunnerType.OPENROUTER, config)` returns `OpenRouterAPIRunner` | Correct type |
-| RF-08 | `create_runner("invalid", config)` raises `ValueError` | Exception raised |
+| RF-04 | `create_runner("invalid", config)` raises `ValueError` | Exception raised |
+| RF-05 | `RunnerType.api_based()` returns `[]` (legacy method, kept for compat) | Empty list |
+| RF-06 | `RunnerType` enum has no `ANTHROPIC` / `OPENAI` / `GEMINI` / `OPENROUTER` members | Sanity guard |
 
 ---
 
@@ -115,16 +114,16 @@ pytest tests/ -v
 
 ---
 
-### 3.10 API Runners (Anthropic, OpenAI, Gemini, OpenRouter)
+### 3.10 Rate-Limit Handling (subscription modes)
 
 | ID | Test | Expected |
 |----|------|----------|
-| AR-01 | Missing API key (env not set, config None) → `RunResult(success=False)` | Error with key name |
-| AR-02 | Missing package (openai not installed) → `RunResult(success=False, error="pip install")` | Error with command |
-| AR-03 | Successful call → `RunResult(success=True, input_tokens>0, output_tokens>0)` | Tokens populated |
-| AR-04 | `cost_usd` populated for anthropic/openai/gemini runners | Float value |
-| AR-05 | `cost_usd` is None for openrouter runner | None (variable pricing) |
-| AR-06 | `generator_model` in config is passed to provider SDK | Mock confirms model ID |
+| RL-01 | Stdout contains "You've hit your limit · resets 9:30pm (Europe/London)" → `rate_limit_reset_at` is a tz-aware UTC datetime | Field set, future datetime |
+| RL-02 | Stated time is in the past relative to "now" (live parse) → next occurrence today; relative parse rolls to tomorrow | Correct rollover |
+| RL-03 | Unparseable IANA zone (e.g. `Made/Up`) → returns `None` (no false trigger) | None |
+| RL-04 | Trigger phrase absent (just "resets 9pm") → `_parse_reset_time` returns `None` | None |
+| RL-05 | `_call_via_runner` raises `RunnerRateLimitedError` (not generic RuntimeError) when `rate_limit_reset_at` set | Typed exception |
+| RL-06 | Orchestrator's `run()` catches the typed exception, prints the panel, schedules launchd if `auto_resume_on_rate_limit=True`, exits clean | No traceback, plist written |
 
 ---
 
@@ -175,13 +174,17 @@ pytest tests/ -v --tb=short
 Run with a simple 3-feature project, each runner in turn:
 
 ```bash
-# Agentic
+# All three coding-agent runners
 harness run tests/fixtures/simple_project.yaml --runner subprocess
 harness run tests/fixtures/simple_project.yaml --runner sdk
+harness run tests/fixtures/simple_project.yaml --runner codex
 
-# API
-harness run tests/fixtures/simple_project.yaml --runner anthropic
-harness run tests/fixtures/simple_project.yaml --runner openai
+# Verify each mode by setting env vars before the run:
+ANTHROPIC_API_KEY=... harness run ... --runner subprocess  # Mode 2 (Claude API)
+OPENAI_API_KEY=...    harness run ... --runner codex       # Mode 4 (OpenAI API)
+ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY \
+                      harness run ... --runner subprocess  # Mode 6 (OpenRouter)
 ```
 
 For each run, verify:
@@ -190,7 +193,7 @@ For each run, verify:
 - [ ] First feature moves IN_PROGRESS, then PASSING or FAILING
 - [ ] Sprint contract saved to `features.json`
 - [ ] `progress.md` updated with correct percentages
-- [ ] Git commit exists for each PASSING feature (agentic runners only)
+- [ ] Git commit exists for each PASSING feature
 - [ ] Restarting the run picks up from where it stopped
 
 ---

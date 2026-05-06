@@ -5,7 +5,7 @@ A production orchestration framework for long-running AI coding agents, implemen
 - [Harness Design for Long-Running Application Development](https://www.anthropic.com/engineering/harness-design-long-running-apps)
 - [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
-Supports **7 interchangeable runners** and **2 orchestration modes** — run everything on your Claude/OpenAI subscription with no API key, or mix-and-match subscription generators with API-powered planners and evaluators.
+Built around **2 coding agents** (Claude Code and Codex) with **6 supported billing/auth modes** — Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API. Direct API providers are not standalone runners; they plug into Claude Code or Codex as the underlying model.
 
 **Core idea:** the harness is built around coding-agent runtimes, not raw model calls. Claude Code and Codex provide the agent architecture — tools, file edits, shell execution, git workflow, and session behavior. The selected model is the engine inside that frame, and users can choose that engine before a project starts.
 
@@ -19,18 +19,18 @@ conda create -n harness python=3.12 -y && conda activate harness
 pip install -e ".[all-providers]"
 
 # 2. Start a new project — interactive, no YAML needed
-harness new --claude-code        # pure subscription, no API key required
-harness new --claude-sdk         # same but via SDK (structured output)
+harness new --claude-code        # Claude Code (subscription by default)
+harness new --claude-sdk         # Claude Code via SDK (structured output)
 harness new --claude-code --model sonnet
 harness new --codex --model gpt-5.2
-harness new --openai-api         # pay-per-token, needs OPENAI_API_KEY
 harness new                      # shows interactive runner menu
 
-# 3. Resume an existing project
-harness run output/my_app_a3f8c21b/config.yaml
+# 3. Resume / import existing work
+harness resume output/my_app_a3f8c21b
+harness import ../my-other-repo  # detect stage, run from the right phase
 
 # 4. Other commands
-harness runners                  # list all runners with requirements
+harness runners                  # list runners with requirements
 harness animation-theme "moonlit ritual" --runner codex
 harness status output/my_app_a3f8c21b/config.yaml
 ```
@@ -80,27 +80,56 @@ Phase 3 — Feature Loop (GAN-style)
 | **File-based state** | `features.json` is the source of truth — restartable, human-inspectable |
 | **Sprint contracts** | Generator and evaluator agree on "done" criteria before implementation |
 | **Two orchestration modes** | Pure subscription (no API key) or API orchestration — user's choice |
-| **Pluggable runners** | Swap execution engine without changing orchestration logic |
+| **Two coding agents, six billing modes** | All execution flows through Claude Code or Codex; API providers plug in as the model |
 
 ---
 
-## Runners
+## Coding agents and modes
 
-The **runner** is what executes implementation work. Pick the one that fits your setup:
+The harness has **two coding agents** that drive all implementation work, and **six supported modes** for paying/authenticating the model behind them. Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) are not standalone runners — they plug into one of the two agents via env vars.
 
-| Runner flag | Internal name | Billing | File I/O | Requires |
-|-------------|---------------|---------|----------|----------|
-| `--claude-code` | `subprocess` | Claude subscription | ✅ Full | `claude` CLI |
-| `--claude-sdk` | `sdk` | Claude subscription | ✅ Full | `pip install -e ".[sdk]"` |
-| `--codex` | `codex` | OpenAI subscription | ✅ Full | `codex` CLI |
-| `--anthropic-api` | `anthropic` | Pay-per-token | ❌ Text only | `ANTHROPIC_API_KEY` |
-| `--openai-api` | `openai` | Pay-per-token | ❌ Text only | `OPENAI_API_KEY` |
-| `--gemini` | `gemini` | Pay-per-token | ❌ Text only | `GEMINI_API_KEY` |
-| `--openrouter` | `openrouter` | Pay-per-token | ❌ Text only | `OPENROUTER_API_KEY` |
+### The two agents
 
-**Agentic runners** (`--claude-code`, `--claude-sdk`, `--codex`) write files, run shell commands, and commit git — they use your existing subscription.
+| Agent | Internal runners | Capabilities |
+|---|---|---|
+| **Claude Code** | `subprocess` (CLI), `sdk` (Python SDK) | Full file I/O, shell, git, multi-turn tool use |
+| **Codex** | `codex` (CLI) | Full file I/O, shell, git, multi-turn tool use |
 
-**API runners** stream text output only. The model describes what it would build; no files are written automatically.
+`subprocess` and `sdk` are two transports onto the same Claude Code agent — pick `sdk` when you want streamed tool-call telemetry; pick `subprocess` for the lighter setup.
+
+### The six modes
+
+| # | Mode | Agent used | Auth source | Notes |
+|---|---|---|---|---|
+| 1 | **Claude subscription** | Claude Code | Pro / Max plan | Default for `--claude-code` and `--claude-sdk`. No env var needed. |
+| 2 | **Claude API** | Claude Code | `ANTHROPIC_API_KEY` | Pay-per-token through the same Claude Code agent. |
+| 3 | **Codex subscription** | Codex | OpenAI Plus subscription | Default for `--codex`. |
+| 4 | **OpenAI API** | Codex | `OPENAI_API_KEY` | Pay-per-token through the Codex agent. |
+| 5 | **Gemini API** | Codex (custom provider) or Claude Code (via OpenRouter) | `GEMINI_API_KEY` | Routed through one of the two agents. |
+| 6 | **OpenRouter API** | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` | OpenRouter's OpenAI-compatible Anthropic endpoint. Use for any model OpenRouter exposes. |
+
+The harness does **not** auto-export these env vars; set them in your shell, in `direnv`, or in a project's `.env` and Claude Code / Codex will pick them up.
+
+### Picking a mode
+
+```bash
+# Claude subscription — no env, no key
+harness new --claude-code
+
+# Claude API
+ANTHROPIC_API_KEY=... harness new --claude-code
+
+# Codex subscription
+harness new --codex
+
+# OpenAI API
+OPENAI_API_KEY=... harness new --codex
+
+# OpenRouter API (route Claude Code through OpenRouter)
+ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY \
+harness new --claude-code --model anthropic/claude-sonnet-4-6
+```
 
 ### Coding Agent Model Selection
 
@@ -127,12 +156,12 @@ codex_local_provider: "ollama"   # or "lmstudio"
 
 ## Orchestration Modes
 
-The **orchestration mode** controls how the **planner** and **evaluator** agents run (the generator always uses the runner you selected):
+The **orchestration mode** controls how the **planner** and **evaluator** agents run (the generator always uses the agent you selected):
 
 | Mode | Planner + Evaluator | API key needed? | Set via |
 |------|--------------------|-----------------|----|
-| `runner` | Same runner as generator | **No** — pure subscription | Default for agentic runners |
-| `api` | Anthropic API directly | **Yes** — `ANTHROPIC_API_KEY` | Default for API runners, or `--with-api` |
+| `runner` | Same agent as generator | **No** — pure subscription | Default |
+| `api` | Anthropic API directly | **Yes** — `ANTHROPIC_API_KEY` | `--with-api` flag |
 
 ```bash
 # Pure subscription — no API key at all
@@ -140,9 +169,6 @@ harness new --claude-code
 
 # Split: generator = Claude Code CLI, planner/evaluator = Anthropic API
 harness new --claude-code --with-api
-
-# All API — ANTHROPIC_API_KEY required, plus OPENAI_API_KEY
-harness new --openai-api           # api mode is the only option for API runners
 ```
 
 The runner status banner at startup always shows which mode is active:
@@ -255,13 +281,9 @@ agent-harness/
 │   │   └── evaluator.py         # Adversarial grader — tool use (api) or XML parsing (runner)
 │   ├── runners/
 │   │   ├── base.py              # CodeRunner ABC, RunResult, RunnerType, PreflightResult
-│   │   ├── subprocess_runner.py # claude --print       (subscription)
-│   │   ├── sdk_runner.py        # claude_code_sdk      (subscription)
-│   │   ├── codex_runner.py      # codex CLI            (OpenAI subscription)
-│   │   ├── api_runner.py        # Anthropic API        (pay-per-token)
-│   │   ├── openai_api_runner.py # OpenAI API           (pay-per-token)
-│   │   ├── gemini_api_runner.py # Google Gemini        (pay-per-token)
-│   │   └── openrouter_api_runner.py # OpenRouter       (pay-per-token)
+│   │   ├── subprocess_runner.py # claude --print       (Claude Code via CLI)
+│   │   ├── sdk_runner.py        # claude_code_sdk      (Claude Code via Python SDK)
+│   │   └── codex_runner.py      # codex CLI            (Codex)
 │   ├── context/
 │   │   ├── handoff.py           # HandoffDocument: cross-session state transfer
 │   │   └── reset.py             # Token budget tracking + context reset logic
@@ -273,7 +295,7 @@ agent-harness/
 │   ├── config.py                # HarnessConfig: YAML-backed, includes orchestration_mode
 │   └── orchestrator.py          # Main loop: phases, GAN loop, context resets, runner status
 ├── tests/
-│   ├── test_runners.py          # 33 runner tests (factory, preflight, all 7 runners)
+│   ├── test_runners.py          # Runner factory + the three coding-agent runners
 │   ├── test_orchestrator.py     # Phase sequencing, GAN loop, max-iteration guard
 │   ├── test_progress.py         # Feature model, tracker CRUD
 │   └── test_handoff.py          # HandoffDocument save/load/render
@@ -305,7 +327,9 @@ output_dir: "./output/my_app_a3f8c21b"
 orchestration_mode: "runner"
 
 # Runner selection
-# Options: subprocess | sdk | codex | anthropic | openai | gemini | openrouter
+# Options: subprocess | sdk | codex
+# Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) plug into one
+# of these via env vars — they are not standalone runners.
 code_runner: "subprocess"
 
 # Coding-agent runtime model.
@@ -323,12 +347,18 @@ progress_animation: "sparkle"    # sparkle | bloom | snow | braille | orbit | pu
 progress_phrase_style: "playful" # playful | steady
 progress_text_effect: "typewriter" # none | typewriter | scramble
 
-# API keys for non-Anthropic runners (can also be set as env vars)
-openai_api_key: null      # or OPENAI_API_KEY
-gemini_api_key: null      # or GEMINI_API_KEY
-openrouter_api_key: null  # or OPENROUTER_API_KEY
+# API-provider keys. NOT used to spawn separate runners — these are for
+# documenting what a project expects. Set the matching env vars in your
+# shell so Claude Code / Codex pick them up:
+#   ANTHROPIC_API_KEY      → Claude Code / SDK
+#   OPENAI_API_KEY         → Codex
+#   ANTHROPIC_BASE_URL +
+#   ANTHROPIC_AUTH_TOKEN   → Claude Code via OpenRouter (token = OPENROUTER_API_KEY)
+openai_api_key: null
+gemini_api_key: null
+openrouter_api_key: null
 
-# Models (used by API runners and api orchestration mode)
+# Models (used by orchestration_mode='api' for planner/evaluator only)
 planner_model: "claude-opus-4-7"
 generator_model: "claude-opus-4-7"
 evaluator_model: "claude-opus-4-7"
@@ -353,14 +383,15 @@ context_reset_threshold_tokens: 150000
 
 ## Environment Variables
 
-| Variable | Required when |
-|----------|--------------|
-| `ANTHROPIC_API_KEY` | `orchestration_mode: api` or `--anthropic-api` runner |
-| `OPENAI_API_KEY` | `--openai-api` or `--openrouter` runner |
-| `GEMINI_API_KEY` | `--gemini` runner |
-| `OPENROUTER_API_KEY` | `--openrouter` runner |
+| Variable | Mode |
+|----------|------|
+| *(none)* | Claude subscription, Codex subscription |
+| `ANTHROPIC_API_KEY` | Claude API (Claude Code uses it instead of subscription auth), or `orchestration_mode: api` for split planner/evaluator |
+| `OPENAI_API_KEY` | OpenAI API (Codex uses it instead of subscription auth) |
+| `GEMINI_API_KEY` | Gemini API (via OpenRouter routing through Claude Code, or via Codex with a custom provider) |
+| `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | OpenRouter API — point Claude Code at OpenRouter's Anthropic-compatible endpoint, with the token set to your OpenRouter key |
 
-With `--claude-code`, `--claude-sdk`, or `--codex` in the default runner mode, **no API key is needed**.
+With `--claude-code`, `--claude-sdk`, or `--codex` in the default runner mode and a paid subscription for the matching agent, **no env var is needed**.
 
 ---
 
@@ -391,13 +422,13 @@ python -m pytest tests/test_runners.py -v   # runner-specific coverage
 
 ## Cost Reference
 
-| Runner | Billing model | Typical cost per feature (5 iterations) |
+| Mode | Billing model | Typical cost per feature (5 iterations) |
 |--------|--------------|----------------------------------------|
-| `subprocess` / `sdk` | Claude subscription | ~$0 extra |
-| `codex` | OpenAI subscription | ~$0 extra |
-| `anthropic` | ~$15/$75 per 1M tokens (Opus 4.7) | ~$2–8 |
-| `openai` | ~$5/$15 per 1M tokens (GPT-4o) | ~$1–4 |
-| `gemini` | ~$1.25/$10 per 1M tokens (2.5 Pro) | ~$0.5–2 |
-| `openrouter` | model-dependent | varies |
+| Claude subscription | Pro / Max plan | ~$0 extra (counts against plan quota) |
+| Codex subscription | OpenAI Plus | ~$0 extra (counts against plan quota) |
+| Claude API | ~$15/$75 per 1M tokens (Opus 4.7) | ~$2–8 |
+| OpenAI API | ~$5/$15 per 1M tokens (GPT-4o-class) | ~$1–4 |
+| Gemini API | ~$1.25/$10 per 1M tokens (2.5 Pro) | ~$0.5–2 |
+| OpenRouter API | Model-dependent | Varies |
 
-In `api` orchestration mode, add ~$0.50–1.00 per feature for planner + evaluator overhead billed to `ANTHROPIC_API_KEY`. In `runner` mode this overhead is zero.
+In `api` orchestration mode (`--with-api`), add ~$0.50–1.00 per feature for planner + evaluator overhead billed to `ANTHROPIC_API_KEY`. In default `runner` mode this overhead is zero.

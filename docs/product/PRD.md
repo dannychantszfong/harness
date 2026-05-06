@@ -30,14 +30,14 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 - Support arbitrary-length projects spanning multiple sessions and context resets
 - Produce scored, evaluated output (GAN-style generator/evaluator loop)
 - Track feature-level progress with pass/fail state persisted across sessions
-- Support at minimum two runner backends (Claude Code CLI and direct API)
+- Support both Claude Code and Codex as the underlying coding agent
 
 ### Should Have (P1)
 - Interactive runner selection at startup with clear billing/capability comparison
 - Runner specified in YAML config or CLI flag (skip interactive prompt)
 - Sprint contract negotiation before each feature implementation
 - Git commit per passing feature as a recovery point
-- Support OpenAI, Gemini, and OpenRouter as API runner alternatives
+- Six supported billing/auth modes: Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API — all routed through the two coding agents
 
 ### Nice to Have (P2)
 - Cost tracking per session (token counts + USD estimate where available)
@@ -48,13 +48,13 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 
 ## 3. Users
 
-| User | Description | Primary Use |
+| User | Description | Primary Mode |
 |------|-------------|-------------|
-| Developer (Claude subscriber) | Pro/Max plan, wants to use subscription | `subprocess` or `sdk` runner |
-| Developer (OpenAI subscriber) | Codex access, prefers GPT models | `codex` or `openai` runner |
-| AI Engineer | Testing harness architecture across providers | Compares runner outputs |
-| Cost-conscious user | Wants cheapest capable model | `gemini` or `openrouter` runner |
-| Enterprise team | Needs specific approved provider | `openrouter` (routes to any model) |
+| Developer (Claude subscriber) | Pro/Max plan, wants to use subscription | Mode 1 — Claude Code via subscription |
+| Developer (OpenAI subscriber) | Codex access, prefers GPT models | Mode 3 — Codex via subscription |
+| AI Engineer | Testing harness architecture across providers | Switches modes per project |
+| Cost-conscious user | Wants cheapest capable model | Mode 5 (Gemini) or Mode 6 (OpenRouter) |
+| Enterprise team | Needs specific approved provider | Mode 6 — OpenRouter routes to any model |
 
 ---
 
@@ -74,18 +74,20 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 
 The **runner** is the component that executes agentic implementation work. The orchestration logic (GAN loop, context resets, progress tracking) is completely decoupled from the runner.
 
-**Runner families:**
+**Two coding agents, three runner transports:**
 
-| Family | Description | File I/O |
-|--------|-------------|---------|
-| Agentic | Drives a full tool-using agent (Claude Code, Codex) | ✅ Writes files directly |
-| API | Single-turn model call, text output | ❌ Text description only |
+| Agent | Runner(s) | Description |
+|--------|-----------|-------------|
+| Claude Code | `subprocess`, `sdk` | Full tool-using agent. Two transports onto the same agent. |
+| Codex | `codex` | Full tool-using agent (OpenAI's). |
+
+API providers (Anthropic, OpenAI, Gemini, OpenRouter) are not standalone runners — they plug into one of the two agents above as the underlying *model* via env vars.
 
 **Acceptance criteria:**
-- All 7 runners implement the same `CodeRunner` interface (`implement(prompt, cwd) → RunResult`)
+- All 3 runners implement the same `CodeRunner` interface (`implement(prompt, cwd) → RunResult`)
 - Switching runners requires only a config change or CLI flag — no code changes
-- Each runner validates its prerequisites (binary on PATH, API key set) and returns a clear error if missing
-- `harness runners` lists all options with billing and requirements
+- Each runner validates its prerequisites (binary on PATH, env vars present for the chosen mode) and returns a clear error if missing
+- `harness runners` lists the three coding-agent options with billing and requirements
 
 ---
 
@@ -99,41 +101,41 @@ The **runner** is the component that executes agentic implementation work. The o
 
 ---
 
-### F-05: Agentic Runners (Subscription-Based)
+### F-05: Coding-Agent Runners
 
-Three agentic runners that drive full tool-using agents:
+Three runners across two coding agents:
 
-| Runner | Binary | Subscription |
-|--------|--------|-------------|
-| `subprocess` | `claude --print --dangerously-skip-permissions` | Claude Pro/Max |
-| `sdk` | `claude_code_sdk.query()` | Claude Pro/Max |
-| `codex` | `codex --approval-mode full-auto` | OpenAI |
+| Runner | Binary / Library | Agent |
+|--------|------------------|-------|
+| `subprocess` | `claude --print --dangerously-skip-permissions` | Claude Code |
+| `sdk` | `claude_code_sdk.query()` | Claude Code |
+| `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox` | Codex |
 
 **Acceptance criteria:**
-- Agentic runners write files to `output_dir`, run bash commands, and commit git
-- If the required binary is not on PATH, the runner returns a `RunResult(success=False, error=...)` with installation instructions
-- Token/cost data is `None` for agentic runners (subscription pricing, not per-token)
+- All three runners write files to `output_dir`, run bash commands, and commit git
+- If the required binary or package is missing, the runner returns a `RunResult(success=False, error=...)` with installation instructions
+- The `sdk` runner exposes per-call token usage; `subprocess` and `codex` return `None` for token fields (subscription pricing is opaque)
+- `code_runner_model` in config is passed to the agent CLI as `--model` (or `ClaudeCodeOptions(model=...)` for SDK)
 
 ---
 
-### F-06: API Runners (Pay-Per-Token)
+### F-06: Six Modes (Agent + Auth Source)
 
-Four API runners for pay-per-token usage:
+The harness supports six combinations of coding agent and billing/auth source. Modes are not separate runners — they are env-var configurations on top of the three runners above.
 
-| Runner | Provider | Default Model | Key env var |
-|--------|----------|---------------|-------------|
-| `anthropic` | Anthropic | `claude-opus-4-7` | `ANTHROPIC_API_KEY` |
-| `openai` | OpenAI | `gpt-4o` | `OPENAI_API_KEY` |
-| `gemini` | Google | `gemini-2.5-pro` | `GEMINI_API_KEY` |
-| `openrouter` | OpenRouter | `anthropic/claude-opus-4-7` | `OPENROUTER_API_KEY` |
+| # | Mode | Agent / Runner | Auth source |
+|---|------|----------------|-------------|
+| 1 | Claude subscription | Claude Code (`subprocess` or `sdk`) | Pro / Max plan |
+| 2 | Claude API | Claude Code | `ANTHROPIC_API_KEY` |
+| 3 | Codex subscription | Codex | OpenAI Plus plan |
+| 4 | OpenAI API | Codex | `OPENAI_API_KEY` |
+| 5 | Gemini API | Codex (custom provider) or Claude Code (via OpenRouter) | `GEMINI_API_KEY` |
+| 6 | OpenRouter API | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` |
 
 **Acceptance criteria:**
-- API runners stream output in real time
-- Token counts and estimated cost (USD) are returned in `RunResult`
-- Missing API key returns `RunResult(success=False, error=...)` with instructions
-- Missing provider package returns `RunResult(success=False, error="pip install ...")` 
-- `generator_model` in config controls which model each API runner uses
-- OpenRouter runner accepts any model ID from openrouter.ai
+- Switching modes requires no code changes — just env var changes
+- The harness does not auto-export env vars from `config.yaml`; users set them in their shell, `direnv`, or `.env`
+- A subscription rate-limit hit (Modes 1, 3) is detected, surfaced with a friendly panel, and (by default) auto-resumed via launchd at the reset time
 
 ---
 

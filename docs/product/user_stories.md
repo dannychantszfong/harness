@@ -36,23 +36,22 @@
 
 ---
 
-**US-15** — As a developer without Claude Code installed, I want to use the OpenAI or Gemini API instead, so I can still run the harness.
+**US-15** — As a developer with an Anthropic API key but no Claude subscription, I want to use Mode 2 (Claude API) so Claude Code authenticates against my API key instead.
 
 > Acceptance criteria:
-> - `harness run config.yaml --runner openai` uses my `OPENAI_API_KEY`
-> - `harness run config.yaml --runner gemini` uses my `GEMINI_API_KEY`
-> - A clear error is shown if the API key is missing
-> - A clear error is shown if the required package (`openai`, `google-generativeai`) is not installed
+> - With `ANTHROPIC_API_KEY` set, `harness run config.yaml --runner subprocess` uses the API key for Claude Code authentication
+> - No subscription login is required for this mode
+> - Claude Code's pay-per-token billing applies — no separate "anthropic" runner needed
 
 ---
 
-**US-16** — As a developer who wants model flexibility, I want to route through OpenRouter so I can use any available model.
+**US-16** — As a developer who wants model flexibility, I want to route Claude Code through OpenRouter so I can use any model OpenRouter exposes.
 
 > Acceptance criteria:
-> - `harness run config.yaml --runner openrouter` routes to OpenRouter
-> - `generator_model: anthropic/claude-opus-4-7` in config selects the model
+> - With `ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1` and `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY`, `harness run config.yaml --runner subprocess` routes through OpenRouter
+> - `code_runner_model: anthropic/claude-sonnet-4-6` (or any OpenRouter model ID) selects the model
 > - Any valid OpenRouter model ID is accepted without code changes
-> - `OPENROUTER_API_KEY` environment variable or `openrouter_api_key` config field is used
+> - The harness does not auto-export these env vars — the user sets them in their shell, `direnv`, or `.env`
 
 ---
 
@@ -60,27 +59,27 @@
 
 > Acceptance criteria:
 > - If `code_runner` is not set in config and `--runner` is not passed, a formatted table is shown
-> - Table shows: runner name, family, billing model, file I/O capability, what's required
+> - Table shows the three coding-agent runners (`subprocess`, `sdk`, `codex`) with billing and requirements
 > - Default selection is `subprocess`
 > - `harness runners` shows the same table without starting a run
 
 ---
 
-**US-18** — As an AI engineer comparing providers, I want to switch runners with a single flag, so I can benchmark outputs across models.
+**US-18** — As an AI engineer comparing models, I want to switch the model behind the same runner so I can benchmark outputs.
 
 > Acceptance criteria:
-> - `harness run config.yaml --runner anthropic` and `harness run config.yaml --runner openai` produce comparable outputs for the same feature
-> - Same `features.json` can be used across runner switches (progress is preserved)
-> - Runner name is logged in the session output for attribution
+> - Switching `code_runner_model` in config (or via `--model`) changes the model used by the agentic runner without changing the runner itself
+> - Same `features.json` can be used across model switches (progress is preserved)
+> - Selected model is shown in the runner status banner
 
 ---
 
-**US-19** — As an OpenAI Codex user, I want to use the `codex` CLI as the agentic runner, so my OpenAI subscription covers the implementation.
+**US-19** — As an OpenAI Codex user, I want to use the `codex` CLI as the runner, so my OpenAI subscription covers the implementation.
 
 > Acceptance criteria:
 > - `harness run config.yaml --runner codex` invokes the `codex` binary
-> - If `codex` is not on PATH, error message includes installation instructions
-> - Codex runner runs non-interactively (`--approval-mode full-auto`)
+> - If `codex` is not on PATH, the error message includes installation instructions
+> - Codex runner runs non-interactively (`codex exec --dangerously-bypass-approvals-and-sandbox`)
 
 ---
 
@@ -127,9 +126,9 @@
 > - Priority order: CLI flag > config file > interactive prompt
 > - Changing `code_runner` in config takes effect on next `harness run`
 
-**US-21** — As a developer, I want to set provider API keys in config as a fallback to environment variables.
+**US-21** — As a developer, I want to document the provider keys a project expects in `config.yaml` so the next person can reproduce the setup.
 
 > Acceptance criteria:
-> - `openai_api_key: sk-...` in config is used if `OPENAI_API_KEY` env var is not set
-> - Env var always takes precedence over config file value
-> - Warning is shown if key appears in config (encourage using env vars for secrets)
+> - `openai_api_key`, `gemini_api_key`, `openrouter_api_key` fields exist in `config.yaml` and persist across `harness new` / `harness resume`
+> - These fields are documentation only — the harness does NOT auto-export them; the user must set the matching env var (`OPENAI_API_KEY`, etc.) in their shell so Claude Code or Codex picks it up
+> - For secrets in production, env vars should be set via `direnv`, `.env`, or a secrets manager rather than committed to YAML
