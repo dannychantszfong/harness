@@ -164,3 +164,89 @@ Should all agents (Planner, Evaluator, Initializer) be routed through the chosen
 - Subscription-first runs can be fully API-key-free
 - API orchestration still requires `ANTHROPIC_API_KEY`
 - Model selection for agentic runtimes lives in `code_runner_model`
+
+---
+
+## ADR-011: Profile Rotation Triggers Only on Rate Limits
+
+**Status:** Accepted
+**Date:** 2026-05-07
+
+### Context
+With `runner_profiles` + per-role `*_runner_order` chains, the orchestrator
+can route a role's call to a fallback profile when the active runner
+fails. The question is: which failures should rotate?
+
+### Decision
+**Rotate only on `RunnerRateLimitedError`.** Concretely:
+
+- A `RunResult` with `rate_limit_reset_at` set (CLI parse hit) → rotate.
+- A `RunResult` with `rate_limited=True` (broad heuristic match against
+  stderr/exception text — covers SDK and Codex too) → rotate.
+- Anything else (timeouts, non-zero exits without rate-limit hints,
+  tool refusals, content-policy failures, prompt-too-large) → propagate
+  as a normal `RuntimeError` and DO NOT rotate.
+
+The contract is enforced at one seam: `Orchestrator._with_role_fallback`.
+Any direct runner call that bypasses this seam will NOT rotate.
+
+### Rationale
+Rotating providers makes sense only when the failure is *recoverable
+by trying a different provider*. For a timeout or a content-policy
+hit, the next provider will likely fail the same way, just slower and
+more expensive. Conservative is correct.
+
+The SDK runner historically didn't populate `rate_limit_reset_at`
+because the SDK doesn't surface a reset time. Without the
+`rate_limited=True` heuristic, SDK rate-limit hits would never trigger
+rotation. The dual signal closes that gap.
+
+### Consequences
+- Auto-resume scheduling fires only when the active provider reported
+  a parseable reset time. SDK/Codex rate-limit hits trigger rotation
+  but not scheduling — the user keeps making progress on the next
+  profile, no schedule is needed.
+- Adding new failure classes to "should rotate" requires editing the
+  rate-limit detection in `harness/runners/_rate_limit.py`, not the
+  orchestrator. Centralized.
+- A future `prompt_too_large` rotation policy (e.g. fall back to a
+  larger-context model) would need a separate signal and a separate
+  rotation rule — out of scope for now.
+
+---
+
+## ADR-012: Cross-Platform Scheduling Backends Are Experimental
+
+**Status:** Accepted
+**Date:** 2026-05-07
+
+### Context
+`harness/auto_resume.py` ships three backends to schedule a one-shot
+`harness resume` after a subscription cap reset: launchd (macOS),
+systemd user timer (Linux), Task Scheduler (Windows). Development
+happens on macOS only. Linux and Windows backends are unit-tested
+with mocked subprocess calls but have not been run against real hosts.
+
+### Decision
+- Treat launchd as primary/supported; systemd and Task Scheduler as
+  *experimental* — clearly labelled in the runbook, never silently
+  promoted to "supported" until live-validated.
+- Continue shipping all three so users on Linux/Windows can try them
+  and report failures.
+- When a backend's underlying tool is missing (`launchctl`/`systemctl`/
+  `schtasks`), `auto_resume.is_supported()` returns False and the
+  orchestrator prints a manual-resume hint instead of attempting to
+  schedule.
+
+### Rationale
+The auto-resume work is a quality-of-life feature, not a correctness
+requirement. Shipping experimental backends behind the same flag and
+defaulting to manual-resume when they fail keeps users unblocked
+without overstating support.
+
+### Consequences
+- Real Linux/Windows validation will surface specific bugs
+  (D-Bus session, schtasks quoting, account permissions, …) — fix
+  those when we have hosts to test on.
+- The runbook lists the known pitfalls per backend so users have a
+  starting point if a backend silently does nothing.

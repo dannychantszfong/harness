@@ -145,6 +145,50 @@ harness setup \
 
 `harness new` and `harness import` copy the saved setup into each project config. On a usage cap, the active role retries with the next profile in its whitelist. If every profile for that role is capped, the normal pause/auto-resume behavior takes over.
 
+### What does (and doesn't) trigger rotation
+
+Runner rotation is intentionally conservative. Rotating providers makes
+sense only when **the failure is recoverable by trying a different
+provider**. For everything else we'd just be spending another
+provider's quota chasing a problem that wasn't theirs.
+
+**Triggers rotation:**
+
+- `RunnerRateLimitedError` raised inside a role-fallback wrapper. The
+  exception is created when a `RunResult` comes back with either
+  `rate_limit_reset_at` set (subprocess parsed "You've hit your limit
+  · resets …") OR `rate_limited=True` (broad heuristic match against
+  the runner's stderr/exception text — covers SDK and Codex too).
+
+**Does NOT trigger rotation:**
+
+- Subprocess timeout (the timeout was the harness's choice, not the
+  provider's; a different provider will likely time out the same way)
+- Generic non-zero exit without rate-limit hints in stderr/stdout
+- Tool refusal / content-policy failures
+- Prompt-too-large errors
+- Anthropic API 529 Overloaded — only relevant in
+  `orchestration_mode='api'` for planner+evaluator. The Anthropic SDK
+  retries automatically; rotation isn't applicable since the runner
+  itself didn't fail.
+- Any exception raised outside `_with_role_fallback(role, …)`. Code
+  paths that call a runner directly (rare) won't rotate even on a
+  genuine rate limit.
+
+### Auto-resume vs rotation: which fires first?
+
+Both are reactions to a `RunnerRateLimitedError`, but at different
+scopes:
+
+1. The orchestrator's role-fallback handler runs FIRST. If a next
+   profile exists in the role's chain, we switch to it and retry the
+   call — the user keeps making progress.
+2. Auto-resume scheduling fires only when (a) every profile in the
+   role's chain has been tried and exhausted in this run, AND (b)
+   `reset_at` is known. Subscription rate-limit messages from the CLI
+   carry a reset time; SDK-style 429s usually don't, so for those
+   you'll see rotation but not scheduling.
+
 ---
 
 ## Incident Playbook
@@ -233,6 +277,25 @@ The harness does NOT auto-export from `harness_config.json` — set the env vars
 # wait until the reset time, then:
 harness resume output/<project_dir>
 ```
+
+> **Backend status (2026-05):**
+> - **launchd (macOS)** — primary, validated.
+> - **systemd (Linux)** — *experimental*. Unit files written to
+>   `~/.config/systemd/user/`. Common pitfalls:
+>   - `systemctl --user` requires an active D-Bus user session;
+>     headless servers usually need `loginctl enable-linger <user>`.
+>   - DST transitions can shift the schedule by 1h; rare in practice
+>     because the cap window is short.
+> - **Task Scheduler (Windows)** — *experimental*. PowerShell wrapper
+>   registered via `schtasks /Create`. Common pitfalls:
+>   - Path-with-spaces quoting in `/TR` is finicky; verify with
+>     `schtasks /Query /TN HarnessResume-<id>`.
+>   - Some Windows accounts need `/RU`/`/RP` for unattended runs;
+>     not exposed yet.
+>
+> Real-world Linux/Windows validation hasn't happened yet. If a
+> backend fails on your host, fall back to manual `harness resume`
+> after the cap clears and let us know which step broke.
 
 ---
 
