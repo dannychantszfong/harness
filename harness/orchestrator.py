@@ -31,6 +31,7 @@ from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
 from harness.progress.tracker import ProgressTracker
 from harness.progress.models import ProjectProgress, EvaluationResult
+from harness.project_git import sync_project_git
 from harness.session.opener import SessionOpener
 
 console = Console()
@@ -59,6 +60,11 @@ class Orchestrator:
         "progress_animation",
         "progress_phrase_style",
         "progress_text_effect",
+        "project_git_push",
+        "project_git_branch",
+        "project_git_remote",
+        "project_github_repo",
+        "project_github_private",
     )
 
     def __init__(self, config: HarnessConfig, runner_type: RunnerType | None = None) -> None:
@@ -116,6 +122,7 @@ class Orchestrator:
         try:
             # Phase 1: Initialize (idempotent — skips if already done)
             progress = self._initialize(confirmed_spec=confirmed_spec)
+            self._sync_project_git("initialization")
 
             # Phase 2: Plan (skip if a confirmed spec was supplied)
             progress = self._plan(progress, confirmed_spec=confirmed_spec)
@@ -365,6 +372,7 @@ class Orchestrator:
                 if result.passed:
                     console.print(f"  [green]✓ Passed (score {result.overall_score:.1f})[/green]")
                     passed = True
+                    self._sync_project_git(f"feature {feature.id}")
                     break
 
                 evaluator_feedback = result.feedback
@@ -441,6 +449,21 @@ class Orchestrator:
                 lines.append(f"  [dim]{field}:[/dim] {old} → [bold]{new}[/bold]")
             console.print("\n".join(lines))
         return changes
+
+    def _sync_project_git(self, reason: str) -> None:
+        result = sync_project_git(self.config, reason=reason)
+        if result.skipped:
+            return
+        if result.ok:
+            console.print(f"  [green]GitHub sync:[/green] {result.message}")
+            return
+        console.print(
+            Panel(
+                result.message,
+                title="[yellow]Project GitHub sync failed[/yellow]",
+                border_style="yellow",
+            )
+        )
 
     def should_reset(self) -> bool:
         return self.context_reset.should_reset(self.total_tokens)

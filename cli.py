@@ -165,6 +165,59 @@ def _apply_model_override(config: HarnessConfig, runner_type: RunnerType, model:
         config.generator_model = model
 
 
+def _normalize_project_git_inputs(
+    github_repo: str | None,
+    git_remote: str | None,
+) -> tuple[str | None, str | None]:
+    if github_repo and git_remote:
+        raise click.UsageError("Use either --github-repo or --git-remote, not both.")
+    if github_repo:
+        repo = github_repo.strip()
+        if "://" in repo or repo.startswith("git@"):
+            raise click.UsageError(
+                "Use --github-repo owner/repo, or pass the full URL to --git-remote."
+            )
+        if repo.count("/") != 1 or any(not part.strip() for part in repo.split("/")):
+            raise click.UsageError("--github-repo must use owner/repo format.")
+        github_repo = repo
+    if git_remote:
+        git_remote = git_remote.strip()
+    return github_repo, git_remote
+
+
+def _apply_project_git_options(
+    config: HarnessConfig,
+    github_repo: str | None,
+    git_remote: str | None,
+    github_private: bool,
+    no_git_push: bool,
+) -> None:
+    """Persist per-output-project GitHub settings."""
+    github_repo, git_remote = _normalize_project_git_inputs(github_repo, git_remote)
+    if github_repo:
+        config.project_github_repo = github_repo
+        config.project_github_private = github_private
+    if git_remote:
+        config.project_git_remote = git_remote
+    if github_repo or git_remote:
+        config.project_git_push = not no_git_push
+
+
+def _print_project_git_sync_result(result) -> None:
+    if result.skipped:
+        return
+    if result.ok:
+        console.print(f"  [green]GitHub sync:[/green] {result.message}")
+        return
+    console.print(
+        Panel(
+            result.message,
+            title="[yellow]Project GitHub sync failed[/yellow]",
+            border_style="yellow",
+        )
+    )
+
+
 def _require_anthropic_key_for_api_mode(orchestration_mode: str) -> None:
     """Abort with a clear message if API orchestration mode needs a key that isn't set."""
     import os
@@ -290,8 +343,26 @@ def _runner_flags(f):
         "Passed as --model to Claude Code / Codex; SDK uses it via ClaudeCodeOptions."
     ),
 )
+@click.option(
+    "--github-repo", "github_repo", default=None,
+    help="GitHub repo for this generated project, e.g. owner/repo. Uses gh to create it if needed.",
+)
+@click.option(
+    "--git-remote", "git_remote", default=None,
+    help="Existing git remote URL for this generated project.",
+)
+@click.option(
+    "--github-private/--github-public", "github_private", default=True,
+    help="Visibility when --github-repo needs to create a repo.",
+)
+@click.option(
+    "--no-git-push", "no_git_push", is_flag=True, default=False,
+    help="Store GitHub/remote config but do not push automatically.",
+)
 @_runner_flags
 def new(runner: str | None, with_api: bool, model: str | None,
+        github_repo: str | None, git_remote: str | None,
+        github_private: bool, no_git_push: bool,
         claude_code: bool, claude_sdk: bool, codex: bool):
     """Create a new project interactively — no config editing needed.
 
@@ -317,6 +388,8 @@ def new(runner: str | None, with_api: bool, model: str | None,
         )
     )
     console.print()
+
+    github_repo, git_remote = _normalize_project_git_inputs(github_repo, git_remote)
 
     # ── Step 1: Resolve runner FIRST so the planner uses the right mode ───
     # Named flags > --runner > interactive prompt. (No config file at this stage.)
@@ -362,6 +435,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
         code_runner=runner_type.value,
     )
     _apply_model_override(config, runner_type, code_model)
+    _apply_project_git_options(config, github_repo, git_remote, github_private, no_git_push)
 
     # Create the output dir now — the runner-mode planner uses it as cwd.
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -552,6 +626,22 @@ def resume(project_dir: str, runner: str | None, model: str | None):
     "--model", "model", default=None,
     help="Override the coding-agent model.",
 )
+@click.option(
+    "--github-repo", "github_repo", default=None,
+    help="GitHub repo for the imported project copy, e.g. owner/repo.",
+)
+@click.option(
+    "--git-remote", "git_remote", default=None,
+    help="Existing git remote URL for the imported project.",
+)
+@click.option(
+    "--github-private/--github-public", "github_private", default=True,
+    help="Visibility when --github-repo needs to create a repo.",
+)
+@click.option(
+    "--no-git-push", "no_git_push", is_flag=True, default=False,
+    help="Store GitHub/remote config but do not push automatically.",
+)
 def import_repo(
     source_path: str,
     in_place: bool,
@@ -561,6 +651,10 @@ def import_repo(
     review_threshold: float,
     runner: str | None,
     model: str | None,
+    github_repo: str | None,
+    git_remote: str | None,
+    github_private: bool,
+    no_git_push: bool,
 ):
     """Import an existing repo and pick up at the right phase.
 
@@ -585,6 +679,7 @@ def import_repo(
     project_name = name or _slug_to_title(source.name)
     project_id = uuid.uuid4().hex[:8]
     brief_was_provided = brief is not None
+    github_repo, git_remote = _normalize_project_git_inputs(github_repo, git_remote)
 
     # ── Step 1: Detect stage on the SOURCE first (so we can show it) ──────
     src_report = detect_stage(source, review_pass_threshold=review_threshold)
@@ -649,6 +744,8 @@ def import_repo(
         config.save_yaml(cfg_path)
 
     _apply_model_override(config, runner_type, model)
+    _apply_project_git_options(config, github_repo, git_remote, github_private, no_git_push)
+    config.save_yaml(cfg_path)
 
     # ── Step 5: Re-detect on the working dir (may differ from source after copy) ─
     work_report = detect_stage(output_dir, review_pass_threshold=review_threshold)
@@ -872,8 +969,11 @@ def init(config_file: str, brief: str, project_name: str | None):
     config.brief = brief
 
     from harness.agents import InitializerAgent
+    from harness.project_git import sync_project_git
+
     agent = InitializerAgent(config)
     progress = agent.run(brief=brief)
+    _print_project_git_sync_result(sync_project_git(config, reason="manual init"))
     console.print(
         f"[green]Initialized {len(progress.features)} features "
         f"for '{config.project_name}'[/green]"

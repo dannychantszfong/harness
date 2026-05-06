@@ -108,6 +108,48 @@ def test_new_persists_agentic_coding_model(runner, tmp_path, monkeypatch):
     assert saved["code_runner_model"] == "gpt-5.2"
 
 
+def test_new_persists_project_github_repo(runner, tmp_path, monkeypatch):
+    """Generated projects can be configured to push to their own GitHub repo."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.chdir(tmp_path)
+    fake_runner = MagicMock()
+    monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: fake_runner)
+    monkeypatch.setattr(
+        "harness.agents.planner.PlannerAgent.align_requirements",
+        lambda self, brief: "# Confirmed spec",
+    )
+
+    captured = {}
+
+    class FakeOrchestrator:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+        def run(self, *a, **kw):
+            captured["ran"] = True
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+
+    result = runner.invoke(
+        main,
+        [
+            "new",
+            "--claude-code",
+            "--model",
+            "sonnet",
+            "--github-repo",
+            "danny/my-app",
+            "--github-public",
+        ],
+        input="Harness\nBuild a thing\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["config"].project_git_push is True
+    assert captured["config"].project_github_repo == "danny/my-app"
+    assert captured["config"].project_github_private is False
+
+
 # ── `harness animation-theme` ────────────────────────────────────────────────
 
 def test_animation_theme_invokes_agentic_runner(runner, tmp_path, monkeypatch):

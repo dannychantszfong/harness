@@ -3,7 +3,7 @@
 **Version:** 2.0  
 **Status:** Active  
 **Owner:** Engineering  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-05-06
 
 ---
 
@@ -37,6 +37,7 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 - Runner specified in `harness_config.json` or CLI flag (skip interactive prompt)
 - Sprint contract negotiation before each feature implementation
 - Git commit per passing feature as a recovery point
+- Optional push of each output project to its own GitHub repo after initialization and each passing feature
 - Six supported billing/auth modes: Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API — all routed through the two coding agents
 
 ### Nice to Have (P2)
@@ -141,6 +142,18 @@ The harness supports six combinations of coding agent and billing/auth source. M
 
 ### F-07: GAN Feedback Loop
 *(unchanged from v1.0)*
+
+---
+
+### F-07A: Independent Project GitHub Repos
+
+Harness-generated work must not become part of the Harness repository. The Harness checkout ignores `output/`, while each generated or imported project directory is treated as its own git repository.
+
+**Acceptance criteria:**
+- `harness new --github-repo owner/repo` saves per-project GitHub settings and pushes after initialization and each passing feature
+- `harness import <repo> --github-repo owner/repo` copies the source without `.git/` by default, then pushes the copy as its own repo
+- `--git-remote URL` supports users who already created the project repo
+- If GitHub sync fails, the workflow reports the failure but does not mark the feature failed solely because the network push failed
 
 ---
 

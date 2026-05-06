@@ -2,7 +2,7 @@
 
 **Version:** 2.0  
 **Status:** Active  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-05-06
 
 ---
 
@@ -93,6 +93,14 @@
 **US-07** — Evaluator feedback fed back to generator automatically.
 
 **US-08** — Every passing feature committed to git immediately.
+
+**US-22** — As a developer, I want each generated/imported project pushed to its own GitHub repo so the Harness source repo never contains output projects.
+
+> Acceptance criteria:
+> - `output/` remains ignored by the Harness repo
+> - `harness new --github-repo owner/repo` configures auto-push for that output project
+> - `harness import <repo> --github-repo owner/repo` copies the source without `.git/` by default and treats the copy as an independent repo
+> - Harness pushes after initialization and after each passing feature, while keeping GitHub push failures separate from feature evaluation failures
 
 ---
 

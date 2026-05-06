@@ -165,4 +165,8 @@ pip install -e ".[sdk]"  # if you use the SDK transport
 #
 # Harness-owned project config lives in harness_config.json so imported repos
 # can keep their own framework config files without collision.
+#
+# Generated/imported apps live under ignored output/ by default. Use
+# --github-repo owner/repo or --git-remote URL to push each output project as
+# its own independent repository.
 ```

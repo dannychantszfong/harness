@@ -56,6 +56,14 @@ class HarnessConfig(BaseModel):
     # job to re-run `harness resume` shortly after the reset time. macOS only.
     auto_resume_on_rate_limit: bool = True
 
+    # Per-output-project GitHub sync. The Harness repo ignores output/; each
+    # generated project is its own git repo and can push to its own remote.
+    project_git_push: bool = False
+    project_git_branch: str = "main"
+    project_git_remote: Optional[str] = None      # e.g. git@github.com:owner/repo.git
+    project_github_repo: Optional[str] = None     # e.g. owner/repo
+    project_github_private: bool = True
+
     # Terminal feel for quiet waits. These only render in interactive terminals.
     progress_animation: Literal[
         "sparkle",

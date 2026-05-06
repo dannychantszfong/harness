@@ -2,7 +2,7 @@
 
 **Audience:** Engineers running or debugging the harness  
 **Version:** 2.0  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-05-06
 
 ---
 
@@ -22,6 +22,10 @@ pip install -e ".[sdk]"
 # 4. Install the coding-agent CLIs you intend to use:
 #    - Claude Code: https://claude.ai/download
 #    - Codex CLI:   https://github.com/openai/codex
+#
+#    Optional for --github-repo project sync:
+#    - GitHub CLI:  https://cli.github.com/
+#      Run: gh auth login
 
 # 5. Set env vars only for the mode you want
 export ANTHROPIC_API_KEY=sk-ant-...    # Claude API mode (or --with-api)
@@ -75,6 +79,25 @@ The harness is fully restartable. Just re-run — it skips init and planning, an
 ```bash
 harness run output/my_project_a3f8c21b/harness_config.json --runner subprocess
 ```
+
+---
+
+## Project GitHub Sync
+
+The Harness checkout ignores `output/`. Each generated or imported project is its own repo, and can push to its own GitHub remote during the workflow.
+
+```bash
+# New project, let gh create/check the GitHub repo
+harness new --claude-code --github-repo owner/my_project
+
+# Import a local repo into output/ and push the copy as a separate repo
+harness import ../my_project --github-repo owner/my_project
+
+# Use an existing remote URL
+harness new --codex --git-remote git@github.com:owner/my_project.git
+```
+
+If sync fails, fix the remote/auth issue and resume the harness. Passing feature state is preserved.
 
 ---
 
@@ -187,6 +210,21 @@ The harness does NOT auto-export from `harness_config.json` — set the env vars
 # wait until the reset time, then:
 harness resume output/<project_dir>
 ```
+
+---
+
+### INC-07A: Project GitHub sync failed
+**Cause:** Missing `gh`, unauthenticated GitHub CLI, bad repo name, or a remote push/auth problem
+**Fix:**
+```bash
+gh auth login
+gh auth status
+
+# Or switch the project config to a remote URL you already control:
+# "project_git_remote": "git@github.com:owner/my_project.git"
+```
+
+The workflow reports the sync failure separately from feature evaluation. After fixing auth or the remote, run `harness resume output/<project_dir>`.
 
 ---
 

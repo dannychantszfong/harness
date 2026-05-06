@@ -92,7 +92,9 @@ class TestOrchestratorPhases:
             patch.object(orchestrator, "_plan", return_value=one_feature_progress),
             patch("harness.orchestrator.GeneratorAgent") as MockGen,
             patch("harness.orchestrator.EvaluatorAgent") as MockEval,
+            patch("harness.orchestrator.sync_project_git") as mock_sync,
         ):
+            mock_sync.return_value = MagicMock(ok=True, skipped=False, message="pushed")
             mock_gen = MockGen.return_value
             mock_gen.implement_feature.return_value = "self eval text"
             mock_gen.negotiate_sprint_contract.return_value = _make_sprint_contract()
@@ -108,6 +110,7 @@ class TestOrchestratorPhases:
             progress = tracker.load()
             f1 = progress.get_feature("f1")
             assert f1.status == FeatureStatus.PASSING
+            assert mock_sync.call_count == 2
 
     def test_feature_iterates_until_pass(self, tmp_config, one_feature_progress):
         orchestrator = Orchestrator(tmp_config)

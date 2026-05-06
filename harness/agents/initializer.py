@@ -262,6 +262,12 @@ class InitializerAgent(BaseAgent):
     def _initial_git_commit(self, directory: Path) -> None:
         try:
             subprocess.run(["git", "init"], cwd=directory, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "branch", "-M", self.config.project_git_branch or "main"],
+                cwd=directory,
+                check=False,
+                capture_output=True,
+            )
             subprocess.run(["git", "add", "-A"], cwd=directory, check=True, capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", "chore: harness initialization"],

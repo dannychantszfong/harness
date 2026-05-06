@@ -24,10 +24,12 @@ harness new --claude-sdk         # Claude Code via SDK (structured output)
 harness new --claude-code --model sonnet
 harness new --codex --model gpt-5.2
 harness new                      # shows interactive runner menu
+harness new --claude-code --github-repo owner/my-app
 
 # 3. Resume / import existing work
 harness resume output/my_app_a3f8c21b
 harness import ../my-other-repo  # detect stage, run from the right phase
+harness import ../my-other-repo --github-repo owner/my-other-repo
 
 # 4. Other commands
 harness runners                  # list runners with requirements
@@ -81,6 +83,7 @@ Phase 3 — Feature Loop (GAN-style)
 | **Sprint contracts** | Generator and evaluator agree on "done" criteria before implementation |
 | **Two orchestration modes** | Pure subscription (no API key) or API orchestration — user's choice |
 | **Two coding agents, six billing modes** | All execution flows through Claude Code or Codex; API providers plug in as the model |
+| **Independent output repos** | The Harness repo ignores `output/`; each generated/imported project owns its own git repo and optional GitHub remote |
 
 ---
 
@@ -257,6 +260,30 @@ The confirmed spec is injected directly into the orchestrator, skipping an extra
 
 ---
 
+## Per-Project GitHub Sync
+
+Harness does not store generated apps inside the Harness git history. `output/` is ignored, and every generated or copied project is treated as its own independent repository.
+
+To create or reuse a GitHub repo for the project before the workflow starts:
+
+```bash
+# Create/check owner/my-app with gh, then push after init and each passing feature
+harness new --claude-code --github-repo owner/my-app
+
+# Import a local repo into output/, then push that copy to its own GitHub repo
+harness import ../my-app --github-repo owner/my-app
+
+# Use an existing remote URL instead of gh repo creation
+harness new --codex --git-remote git@github.com:owner/my-app.git
+
+# Store the remote setting but do not auto-push during the run
+harness new --claude-code --github-repo owner/my-app --no-git-push
+```
+
+`--github-repo` requires the GitHub CLI (`gh`) to be installed and authenticated. It sets `origin` to `https://github.com/owner/repo.git`; use `--git-remote` for SSH or any custom remote URL.
+
+---
+
 ## Resuming a Project
 
 ```bash
@@ -332,6 +359,11 @@ Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`
   "progress_animation": "sparkle",
   "progress_phrase_style": "playful",
   "progress_text_effect": "typewriter",
+  "project_git_push": false,
+  "project_git_branch": "main",
+  "project_git_remote": null,
+  "project_github_repo": null,
+  "project_github_private": true,
   "openai_api_key": null,
   "gemini_api_key": null,
   "openrouter_api_key": null,

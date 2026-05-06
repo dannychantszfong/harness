@@ -1,7 +1,7 @@
 # Test Plan — Claude Agent Harness
 
 **Version:** 2.0  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-05-06
 **Scope:** All harness components excluding generated application code  
 
 ---
@@ -36,6 +36,7 @@ pytest tests/ -v
 - HarnessConfig JSON loading and weight validation
 - **All 3 coding-agent runners** — error paths (missing binary, missing package)
 - Runner factory (`create_runner`) with each `RunnerType`
+- Per-output-project git/GitHub sync helper and CLI persistence
 - `RunResult` fields are correctly populated when the runner exposes them (SDK transport)
 - `RunResult.rate_limit_reset_at` is set when a subscription cap is hit
 - `SubprocessRunner` — timeout, non-zero exit, binary not found, rate-limit detection
@@ -149,6 +150,20 @@ pytest tests/ -v
 
 ---
 
+### 3.13 Project GitHub Sync
+
+| ID | Test | Expected |
+|----|------|----------|
+| GS-01 | `project_git_push=false` or no remote configured | Sync skips without shelling out |
+| GS-02 | `project_git_remote` configured | Output dir is initialized as git repo, `origin` is set, current HEAD is pushed |
+| GS-03 | Existing in-place repo has a current branch | Sync preserves that branch instead of renaming it |
+| GS-04 | `project_github_repo` configured and `gh repo view` misses | `gh repo create` is attempted with configured visibility |
+| GS-05 | `gh` missing | Sync reports a clear failure without aborting feature evaluation |
+| GS-06 | `harness new --github-repo owner/repo` | Config persists GitHub settings |
+| GS-07 | `harness import --git-remote URL` | Imported project config persists remote settings |
+
+---
+
 ## 4. Test Execution
 
 ```bash
@@ -194,6 +209,7 @@ For each run, verify:
 - [ ] Sprint contract saved to `features.json`
 - [ ] `progress.md` updated with correct percentages
 - [ ] Git commit exists for each PASSING feature
+- [ ] If configured, project remote receives init and passing-feature commits
 - [ ] Restarting the run picks up from where it stopped
 
 ---

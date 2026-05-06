@@ -319,6 +319,32 @@ def test_import_copy_mode_creates_output_dir(runner, tmp_path, monkeypatch):
     assert (copied / CONFIG_FILENAME).exists(), f"{CONFIG_FILENAME} not written into copy"
 
 
+def test_import_persists_project_git_remote(runner, tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "thing.py").write_text("x=1\n")
+
+    captured = {}
+
+    class FakeOrch:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+        def run(self, **k): pass
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    _stub_no_spec_assessment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(main, [
+        "import", str(src), "-r", "subprocess",
+        "--brief", "test brief",
+        "--git-remote", "git@github.com:owner/imported.git",
+    ])
+    assert result.exit_code == 0, result.output
+    assert captured["config"].project_git_push is True
+    assert captured["config"].project_git_remote == "git@github.com:owner/imported.git"
+
+
 def test_import_copy_mode_rehomes_existing_harness_config(runner, tmp_path, monkeypatch):
     src = tmp_path / "src"
     src.mkdir()

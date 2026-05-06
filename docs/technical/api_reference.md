@@ -1,11 +1,50 @@
 # API Reference — Claude Agent Harness
 
 **Version:** 2.0  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-05-06
 
 ---
 
 ## CLI Commands
+
+### `harness new`
+
+Create a new output project interactively, confirm a product spec, then start the full workflow.
+
+```bash
+harness new --claude-code
+harness new --codex --model gpt-5.2
+harness new --claude-code --github-repo owner/my-app
+harness new --codex --git-remote git@github.com:owner/my-app.git
+```
+
+**GitHub options:**
+
+| Option | Description |
+|--------|-------------|
+| `--github-repo owner/repo` | Create/check that GitHub repo with `gh`, then push the output project after init and each passing feature |
+| `--git-remote URL` | Use an existing remote URL as `origin` for the output project |
+| `--github-private` / `--github-public` | Visibility if `--github-repo` creates the repo |
+| `--no-git-push` | Save the remote settings without auto-pushing during the run |
+
+Harness itself ignores `output/`; each generated project is initialized and pushed as its own independent git repo.
+
+---
+
+### `harness import <source_path>`
+
+Copy or harness-ify an existing local repository, detect its stage, and enter the matching workflow phase.
+
+```bash
+harness import ../my-existing-app
+harness import ../my-existing-app --github-repo owner/my-existing-app
+harness import ../my-existing-app --git-remote git@github.com:owner/my-existing-app.git
+harness import ../my-existing-app --in-place
+```
+
+By default, import copies the source into `output/<slug>_<id>/` without the source `.git/` directory, so the imported project copy becomes a fresh independent repo. `--in-place` keeps the source repo in place and preserves its current branch.
+
+---
 
 ### `harness run <config_file>`
 
@@ -149,6 +188,11 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 | `openai_api_key` | str\|None | `None` | Documents the OpenAI key the project expects (set `OPENAI_API_KEY` env var to use it) |
 | `gemini_api_key` | str\|None | `None` | Documents the Gemini key the project expects (set `GEMINI_API_KEY` env var) |
 | `openrouter_api_key` | str\|None | `None` | Documents the OpenRouter key the project expects (set `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`) |
+| `project_git_push` | bool | `False` | Auto-push this output project repo during workflow seams |
+| `project_git_branch` | str | `"main"` | Branch name for newly initialized output repos |
+| `project_git_remote` | str\|None | `None` | Existing git remote URL to set as `origin` |
+| `project_github_repo` | str\|None | `None` | GitHub `owner/repo`; checked/created with `gh` when no remote URL is set |
+| `project_github_private` | bool | `True` | Visibility used when creating `project_github_repo` |
 | `max_iterations_per_feature` | int | `15` | Max GAN loop iterations |
 | `evaluator_pass_score` | float | `8.0` | Minimum score to mark PASSING |
 | `context_reset_threshold_tokens` | int | `150_000` | Token count triggering a reset |
