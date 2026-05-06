@@ -243,6 +243,33 @@ def test_sdk_passes_configured_model(tmp_config, monkeypatch):
     assert mock_sdk.ClaudeCodeOptions.call_args.kwargs["model"] == "opus"
 
 
+def test_sdk_runs_in_bypass_permissions_mode(tmp_config, monkeypatch):
+    """SDK must match SubprocessRunner's --dangerously-skip-permissions YOLO.
+
+    Without this, the SDK falls back to its default permission_mode and would
+    either prompt or fail on the first risky tool call in unattended runs.
+    """
+    class ResultMessage:
+        usage = None
+        cost_usd = 0.0
+
+    async def fake_query(*args, **kwargs):
+        yield ResultMessage()
+
+    mock_sdk = MagicMock()
+    mock_sdk.query = fake_query
+    mock_sdk.ClaudeCodeOptions = MagicMock()
+    monkeypatch.setitem(sys.modules, "claude_code_sdk", mock_sdk)
+
+    runner = SDKRunner(tmp_config)
+    runner.implement("prompt", cwd="/tmp")
+
+    assert (
+        mock_sdk.ClaudeCodeOptions.call_args.kwargs["permission_mode"]
+        == "bypassPermissions"
+    )
+
+
 # ── CodexRunner ───────────────────────────────────────────────────────────────
 
 def test_codex_missing_binary(tmp_config, monkeypatch):

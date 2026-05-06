@@ -87,6 +87,9 @@ class SDKRunner(CodeRunner):
                     cwd=cwd,
                     max_turns=50,
                     model=getattr(self.config, "code_runner_model", None),
+                    # YOLO — matches `claude --print --dangerously-skip-permissions`
+                    # used by SubprocessRunner. Required for unattended runs.
+                    permission_mode="bypassPermissions",
                 ),
             ):
                 msg_type = type(message).__name__
