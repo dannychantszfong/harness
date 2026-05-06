@@ -1,7 +1,8 @@
 """Initializer agent — runs exactly once per project.
 
 Responsibilities (from article 2):
-- Create init.sh  (standardizes app startup; enables quick health checks)
+- Create the init script (filename + flavor depend on the host platform —
+  init.sh on macOS/Linux, init.ps1 on Windows; users can override).
 - Create features.json (JSON feature list, all initially 'pending')
 - Create progress.md  (human-readable summary)
 - Write an initial git commit so all subsequent sessions have a clean baseline
@@ -18,10 +19,33 @@ from harness.config import HarnessConfig
 from harness.progress.models import Feature, FeatureStatus, ProjectProgress
 from harness.progress.tracker import ProgressTracker
 
+
+# Platform-specific init-script defaults. The initializer falls back to
+# these when the agent doesn't write the file directly to disk.
+_INIT_SCRIPT_DEFAULTS = {
+    "bash": "#!/bin/bash\necho 'No init script provided'\n",
+    "powershell": "Write-Host 'No init script provided'\n",
+    "cmd": "@echo off\r\necho No init script provided\r\n",
+}
+
+# How to describe the target script to the planning agent — depends on
+# whether the project will run on macOS/Linux (bash) or Windows
+# (powershell preferred, cmd as fallback).
+_INIT_SCRIPT_PROMPT_LABEL = {
+    "bash": "init.sh — a bash script",
+    "powershell": "init.ps1 — a PowerShell script",
+    "cmd": "init.bat — a Windows batch script",
+}
+
+
+def _default_init_content(script_type: str) -> str:
+    return _INIT_SCRIPT_DEFAULTS.get(script_type, _INIT_SCRIPT_DEFAULTS["bash"])
+
+
 _SYSTEM = """You are a senior software architect initializing a new project harness.
 Your job is to:
 1. Decompose the project brief into a concrete, ordered feature list (JSON).
-2. Write an init.sh script that starts the application cleanly.
+2. Write an init script that starts the application cleanly.
 3. Write a concise progress.md describing the current state.
 
 Be exhaustive with features — the article recommends 200+ for large apps.
@@ -114,25 +138,36 @@ class InitializerAgent(BaseAgent):
 
         init_path = self.config.init_script_path
         init_path.write_text(init_sh)
-        init_path.chmod(0o755)
+        # POSIX execute bit only matters for bash; on Windows + PowerShell/
+        # cmd scripts, executability is controlled by file association +
+        # ExecutionPolicy, not the file's mode.
+        if self.config.effective_init_script_type == "bash":
+            try:
+                init_path.chmod(0o755)
+            except (NotImplementedError, OSError):
+                # chmod on Windows + WSL paths can raise; non-fatal.
+                pass
 
         self._initial_git_commit(output_dir)
 
         print(
             f"[initializer] Created {len(features)} features, "
-            f"init.sh, and initial git commit."
+            f"{init_path.name}, and initial git commit."
         )
         return progress
 
     def _decompose_via_api(self, planning_source: str) -> tuple[list[dict], str]:
         """Use Anthropic API tool-use to get a structured feature list."""
+        script_type = self.config.effective_init_script_type
+        script_label = _INIT_SCRIPT_PROMPT_LABEL[script_type]
         messages = [
             {
                 "role": "user",
                 "content": (
                     f"{planning_source}\n\n"
-                    "Please decompose this into a feature list and write an init.sh. "
-                    "Use the set_feature_list tool to output your answer."
+                    f"Please decompose this into a feature list and write an "
+                    f"init script ({script_label}). "
+                    f"Use the set_feature_list tool to output your answer."
                 ),
             }
         ]
@@ -145,7 +180,7 @@ class InitializerAgent(BaseAgent):
         if not tool_uses:
             raise RuntimeError("Initializer did not call set_feature_list tool")
         inp = tool_uses[0]["input"]
-        return inp["features"], inp.get("init_sh", "#!/bin/bash\necho 'No init script provided'")
+        return inp["features"], inp.get("init_sh", _default_init_content(script_type))
 
     def _decompose_via_runner(self, planning_source: str) -> tuple[list[dict], str]:
         """Use the runner to decompose the brief.
@@ -153,7 +188,19 @@ class InitializerAgent(BaseAgent):
         Agentic runners (Claude Code, Codex) prefer to write files directly,
         so the prompt asks for that. We also accept the inline-tagged format
         as a fallback for runners that just return text.
+
+        The init script's filename and flavor are platform-aware: bash on
+        macOS/Linux, PowerShell on Windows. See `HarnessConfig.effective_*`.
         """
+        script_type = self.config.effective_init_script_type
+        script_filename = self.config.effective_init_script
+        script_label = _INIT_SCRIPT_PROMPT_LABEL[script_type]
+        flavor_note = {
+            "bash": "(macOS/Linux target)",
+            "powershell": "(Windows PowerShell 5+ or PowerShell Core)",
+            "cmd": "(Windows cmd.exe / batch script)",
+        }[script_type]
+
         prompt = (
             f"{_SYSTEM}\n\n"
             f"{planning_source}\n\n"
@@ -164,11 +211,12 @@ class InitializerAgent(BaseAgent):
             "Each entry must have these exact fields:\n"
             '       {\"id\": \"f1\", \"name\": \"...\", \"description\": \"...\", \"priority\": 0}\n'
             "     Lower priority = higher importance. Be exhaustive — aim for 50-200 atomic features.\n\n"
-            "  2. init.sh — a bash script that starts the application cleanly "
-            "(can be a placeholder echo if there's nothing to start yet).\n\n"
+            f"  2. {script_filename} — {script_label} {flavor_note} that starts the "
+            "application cleanly (can be a placeholder echo if there's nothing to start yet).\n\n"
             "After writing both files, print the single line `INIT_DONE` and stop. "
             "If for some reason you cannot write files, output the contents inline "
-            "wrapped in <features>...</features> and <init_sh>...</init_sh> tags."
+            f"wrapped in <features>...</features> and <init_sh>...</init_sh> tags. "
+            "(The <init_sh> tag name is historical; use it for whatever script flavor was requested above.)"
         )
         output = self._call_via_runner(prompt)
 
@@ -183,7 +231,7 @@ class InitializerAgent(BaseAgent):
             init_sh = (
                 init_path.read_text()
                 if init_path.exists()
-                else "#!/bin/bash\necho 'No init script provided'"
+                else _default_init_content(script_type)
             )
             return raw, init_sh
 
@@ -196,7 +244,7 @@ class InitializerAgent(BaseAgent):
             init_sh = (
                 init_match.group(1).strip()
                 if init_match
-                else "#!/bin/bash\necho 'No init script provided'"
+                else _default_init_content(script_type)
             )
             return raw_features, init_sh
 

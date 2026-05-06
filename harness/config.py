@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 import json
+import platform
 import uuid
 import yaml
 from pathlib import Path
@@ -67,9 +68,24 @@ class HarnessConfig(BaseModel):
     # Progress files (written inside output_dir)
     features_file: str = "features.json"
     progress_file: str = "progress.md"
-    init_script: str = "init.sh"
-    startup_command: Optional[str] = None
     spec_file: str = "spec.md"
+
+    # Init script — the per-project bootstrap that the generator and
+    # evaluator both run to start the app for testing.
+    #
+    # Two layers, both Optional, both with platform-aware defaults:
+    #   • init_script_type — "bash" | "powershell" | "cmd". Determines the
+    #     filename suffix, the file's header line, the chmod policy, and
+    #     the prompt the initializer agent sees. None → derived: bash on
+    #     macOS/Linux, powershell on Windows.
+    #   • init_script — the filename inside output_dir. None → derived
+    #     from init_script_type: init.sh / init.ps1 / init.bat.
+    #
+    # Use `effective_init_script_type` and `effective_init_script` to
+    # read the resolved values; never read these fields directly.
+    init_script: Optional[str] = None
+    init_script_type: Optional[Literal["bash", "powershell", "cmd"]] = None
+    startup_command: Optional[str] = None
 
     # Sprint contracts
     sprint_contract_enabled: bool = True
@@ -204,19 +220,50 @@ class HarnessConfig(BaseModel):
         return self.output_path / self.progress_file
 
     @property
+    def effective_init_script_type(self) -> str:
+        """Resolved init script type: bash | powershell | cmd.
+
+        Priority: explicit init_script_type → suffix of explicit init_script
+        → host platform default (powershell on Windows, bash elsewhere).
+        """
+        if self.init_script_type:
+            return self.init_script_type
+        if self.init_script:
+            suffix = Path(self.init_script).suffix.lower()
+            if suffix == ".ps1":
+                return "powershell"
+            if suffix in {".bat", ".cmd"}:
+                return "cmd"
+            if suffix == ".sh":
+                return "bash"
+        return "powershell" if platform.system() == "Windows" else "bash"
+
+    @property
+    def effective_init_script(self) -> str:
+        """Resolved init script filename. Derived from type if not set."""
+        if self.init_script:
+            return self.init_script
+        return {
+            "bash": "init.sh",
+            "powershell": "init.ps1",
+            "cmd": "init.bat",
+        }[self.effective_init_script_type]
+
+    @property
     def init_script_path(self) -> Path:
-        return self.output_path / self.init_script
+        return self.output_path / self.effective_init_script
 
     @property
     def startup_command_for_platform(self) -> str:
         if self.startup_command:
             return self.startup_command
-        suffix = Path(self.init_script).suffix.lower()
-        if suffix == ".ps1":
-            return f"powershell -ExecutionPolicy Bypass -File {self.init_script}"
-        if suffix in {".bat", ".cmd"}:
-            return self.init_script
-        return f"bash {self.init_script}"
+        script_type = self.effective_init_script_type
+        script = self.effective_init_script
+        if script_type == "powershell":
+            return f"powershell -ExecutionPolicy Bypass -File {script}"
+        if script_type == "cmd":
+            return script
+        return f"bash {script}"
 
     @property
     def spec_path(self) -> Path:
