@@ -17,6 +17,19 @@ from harness.ui import QuietAnimator
 
 console = Console()
 
+_RATE_LIMIT_HINTS = (
+    "rate limit",
+    "usage limit",
+    "quota",
+    "too many requests",
+    "429",
+)
+
+
+def _looks_rate_limited(text: str) -> bool:
+    lowered = text.lower()
+    return any(hint in lowered for hint in _RATE_LIMIT_HINTS)
+
 
 class CodexRunner(CodeRunner):
     """Runs `codex` CLI as a child process."""
@@ -92,6 +105,7 @@ class CodexRunner(CodeRunner):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,
+                    env=self.subprocess_env(),
                     capture_output=True,
                     text=True,
                     timeout=timeout_seconds,
@@ -110,10 +124,12 @@ class CodexRunner(CodeRunner):
             )
 
         if result.returncode != 0:
+            combined = f"{result.stdout or ''}\n{result.stderr or ''}"
             return RunResult(
                 output=result.stdout,
                 success=False,
                 error=result.stderr or f"codex exited with code {result.returncode}",
+                rate_limited=_looks_rate_limited(combined),
             )
 
         return RunResult(

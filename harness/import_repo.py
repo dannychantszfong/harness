@@ -268,7 +268,7 @@ def assess_repo_spec_with_agent(
     prompt = _build_spec_assessment_prompt(suggested_brief=suggested_brief)
     result = runner.implement(prompt, cwd=str(project_dir), timeout_seconds=timeout_seconds)
     if not result.success:
-        if result.rate_limit_reset_at is not None:
+        if result.rate_limited or result.rate_limit_reset_at is not None:
             raise RunnerRateLimitedError(
                 reset_at=result.rate_limit_reset_at,
                 raw_message=result.error or "",

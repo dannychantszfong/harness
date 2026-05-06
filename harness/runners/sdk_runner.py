@@ -18,6 +18,19 @@ from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerT
 
 console = Console()
 
+_RATE_LIMIT_HINTS = (
+    "rate limit",
+    "usage limit",
+    "quota",
+    "too many requests",
+    "429",
+)
+
+
+def _looks_rate_limited(text: str) -> bool:
+    lowered = text.lower()
+    return any(hint in lowered for hint in _RATE_LIMIT_HINTS)
+
 
 def _check_sdk() -> tuple[bool, str]:
     try:
@@ -65,9 +78,16 @@ class SDKRunner(CodeRunner):
         console.print("[dim]Runner: Claude Code SDK — using subscription[/dim]")
 
         try:
-            return asyncio.run(self._run_async(prompt, cwd, timeout_seconds))
+            with self.profile_env():
+                return asyncio.run(self._run_async(prompt, cwd, timeout_seconds))
         except Exception as exc:
-            return RunResult(output="", success=False, error=str(exc))
+            text = str(exc)
+            return RunResult(
+                output="",
+                success=False,
+                error=text,
+                rate_limited=_looks_rate_limited(text),
+            )
 
     async def _run_async(self, prompt: str, cwd: str, timeout_seconds: int) -> RunResult:
         from claude_code_sdk import query, ClaudeCodeOptions

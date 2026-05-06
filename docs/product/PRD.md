@@ -38,6 +38,7 @@ The Claude Agent Harness is a production orchestration framework for long-runnin
 - Sprint contract negotiation before each feature implementation
 - Git commit per passing feature as a recovery point
 - Optional push of each output project to its own GitHub repo after initialization and each passing feature
+- First-time `harness setup` for role-aware runner priority/fallback policy
 - Six supported billing/auth modes: Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API — all routed through the two coding agents
 
 ### Nice to Have (P2)
@@ -154,6 +155,18 @@ Harness-generated work must not become part of the Harness repository. The Harne
 - `harness import <repo> --github-repo owner/repo` copies the source without `.git/` by default, then pushes the copy as its own repo
 - `--git-remote URL` supports users who already created the project repo
 - If GitHub sync fails, the workflow reports the failure but does not mark the feature failed solely because the network push failed
+
+---
+
+### F-07B: Role-Aware Runner Rotation
+
+Users can define named runner profiles and whitelist which profiles each role may use. When a profile reports a usage cap, the orchestrator retries that same role call with the next profile in order.
+
+**Acceptance criteria:**
+- `harness setup` writes reusable first-time defaults for runner profiles and role orders
+- Project configs can store `runner_profiles` plus planner/generator/evaluator/reviewer order lists
+- Generator, planner, evaluator, and reviewer calls rotate independently on usage caps
+- API-style fallbacks are expressed as agent profiles with env vars/extra args, keeping Claude Code and Codex as the execution frame
 
 ---
 

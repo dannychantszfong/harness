@@ -37,6 +37,7 @@ pytest tests/ -v
 - **All 3 coding-agent runners** — error paths (missing binary, missing package)
 - Runner factory (`create_runner`) with each `RunnerType`
 - Per-output-project git/GitHub sync helper and CLI persistence
+- First-time setup and role-aware runner fallback policy
 - `RunResult` fields are correctly populated when the runner exposes them (SDK transport)
 - `RunResult.rate_limit_reset_at` is set when a subscription cap is hit
 - `SubprocessRunner` — timeout, non-zero exit, binary not found, rate-limit detection
@@ -161,6 +162,18 @@ pytest tests/ -v
 | GS-05 | `gh` missing | Sync reports a clear failure without aborting feature evaluation |
 | GS-06 | `harness new --github-repo owner/repo` | Config persists GitHub settings |
 | GS-07 | `harness import --git-remote URL` | Imported project config persists remote settings |
+
+---
+
+### 3.14 Runner Rotation
+
+| ID | Test | Expected |
+|----|------|----------|
+| RR-01 | `harness setup --profile ... --generator-order ...` | Setup JSON persists profiles, env, and role order |
+| RR-02 | `harness new` with saved setup | Project config receives runner profiles without prompting for runner/model |
+| RR-03 | Generator profile returns `rate_limited=True` | Orchestrator retries the same feature call with the next generator profile |
+| RR-04 | Codex stderr contains `429 rate limit` | `RunResult.rate_limited` is true |
+| RR-05 | Profile env contains `$OPENROUTER_API_KEY` | Runner expands it from the process env at execution time |
 
 ---
 

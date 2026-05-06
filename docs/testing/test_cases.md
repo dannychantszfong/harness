@@ -251,6 +251,8 @@ Before each release, verify:
 - [ ] `harness import <repo>` correctly detects stage and routes to review-only when ≥80% features pass
 - [ ] `harness new --github-repo owner/repo` keeps generated output out of the Harness repo and pushes the output project repo
 - [ ] `harness import <repo> --git-remote URL` copies without source `.git/` and sets the copied project remote
+- [ ] `harness setup` writes runner profiles and new projects inherit them
+- [ ] A rate-limited generator profile falls through to the next allowed profile
 - [ ] Switching runner mid-project (config change) resumes from last state
 - [ ] `ANTHROPIC_API_KEY` is required for api orchestration, but not runner orchestration
 - [ ] `--model` is persisted as `code_runner_model` for Claude Code/Codex runners

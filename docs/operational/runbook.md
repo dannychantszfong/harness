@@ -38,6 +38,9 @@ export ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
 # 6. Verify
 harness --help
 harness runners   # confirm the three coding-agent rows print cleanly
+
+# Optional first-time policy
+harness setup
 ```
 
 ---
@@ -124,6 +127,26 @@ harness run harness_config.json -r codex        # Codex CLI
 
 ---
 
+## Runner Rotation Policy
+
+Use `harness setup` once to save named runner profiles and per-role fallback order.
+
+```bash
+harness setup \
+  --profile claude:subprocess:sonnet \
+  --profile codex:codex:gpt-5.2 \
+  --profile claude-openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter \
+  --profile-env claude-openrouter:ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+  --profile-env 'claude-openrouter:ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY' \
+  --planner-order codex,claude \
+  --generator-order claude,codex,claude-openrouter \
+  --evaluator-order codex,claude-openrouter
+```
+
+`harness new` and `harness import` copy the saved setup into each project config. On a usage cap, the active role retries with the next profile in its whitelist. If every profile for that role is capped, the normal pause/auto-resume behavior takes over.
+
+---
+
 ## Incident Playbook
 
 ### INC-01: `FileNotFoundError: Features file not found`
@@ -203,9 +226,9 @@ The harness does NOT auto-export from `harness_config.json` — set the env vars
 ---
 
 ### INC-07: Subscription rate limit hit mid-run
-**Symptom:** Rich panel "Paused — rate limit" with a reset time; orchestrator exits cleanly
+**Symptom:** Rich panel "Paused — rate limit" with a reset time; orchestrator exits cleanly, unless a runner profile fallback is available
 **Cause:** Claude Code (Pro/Max) or Codex (Plus) usage cap reached
-**Fix:** If `auto_resume_on_rate_limit: true` (default), a launchd job is scheduled for shortly after the reset. Otherwise:
+**Fix:** If role fallback profiles are configured, Harness rotates automatically. If no fallback remains and `auto_resume_on_rate_limit: true` (default), a launchd job is scheduled for shortly after the reset. Otherwise:
 ```bash
 # wait until the reset time, then:
 harness resume output/<project_dir>

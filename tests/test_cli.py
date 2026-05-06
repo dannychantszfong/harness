@@ -22,6 +22,7 @@ from click.testing import CliRunner
 import cli
 from cli import main
 from harness.config import CONFIG_FILENAME
+from harness.runner_profiles import HarnessSetup, save_setup
 from harness.runners.base import PreflightResult, RunResult
 
 
@@ -148,6 +149,86 @@ def test_new_persists_project_github_repo(runner, tmp_path, monkeypatch):
     assert captured["config"].project_git_push is True
     assert captured["config"].project_github_repo == "danny/my-app"
     assert captured["config"].project_github_private is False
+
+
+def test_setup_writes_runner_rotation_config(runner, tmp_path):
+    setup_path = tmp_path / "setup.json"
+
+    result = runner.invoke(main, [
+        "setup",
+        "--config", str(setup_path),
+        "--profile", "claude:subprocess:sonnet",
+        "--profile", "codex:codex:gpt-5.2",
+        "--profile", "openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter",
+        "--profile-env", "openrouter:ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1",
+        "--profile-env", "openrouter:ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY",
+        "--planner-order", "codex,claude",
+        "--generator-order", "claude,codex,openrouter",
+        "--evaluator-order", "codex,openrouter",
+    ])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(setup_path.read_text())
+    assert data["generator_runner_order"] == ["claude", "codex", "openrouter"]
+    openrouter = next(p for p in data["runner_profiles"] if p["name"] == "openrouter")
+    assert openrouter["provider"] == "openrouter"
+    assert openrouter["env"]["ANTHROPIC_AUTH_TOKEN"] == "$OPENROUTER_API_KEY"
+
+
+def test_new_loads_setup_profiles_without_runner_prompt(runner, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    setup_path = tmp_path / "setup.json"
+    save_setup(
+        HarnessSetup(
+            runner_profiles=[
+                {
+                    "name": "claude",
+                    "runner": "subprocess",
+                    "model": "sonnet",
+                },
+                {
+                    "name": "codex",
+                    "runner": "codex",
+                    "model": "gpt-5.2",
+                },
+            ],
+            planner_runner_order=["codex"],
+            generator_runner_order=["claude", "codex"],
+            evaluator_runner_order=["codex"],
+            reviewer_runner_order=["codex"],
+        ),
+        setup_path,
+    )
+    monkeypatch.setenv("HARNESS_SETUP_CONFIG", str(setup_path))
+    monkeypatch.chdir(tmp_path)
+    fake_runner = MagicMock()
+    monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: fake_runner)
+    monkeypatch.setattr("harness.runner_profiles.create_runner", lambda *a, **k: fake_runner)
+    monkeypatch.setattr(
+        "harness.agents.planner.PlannerAgent.align_requirements",
+        lambda self, brief: "# Confirmed spec",
+    )
+
+    captured = {}
+
+    class FakeOrchestrator:
+        def __init__(self, cfg, runner_type=None):
+            captured["config"] = cfg
+            captured["runner_type"] = runner_type
+        def run(self, *a, **kw):
+            captured["ran"] = True
+
+    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+
+    result = runner.invoke(main, ["new"], input="Harness\nBuild a thing\n")
+
+    assert result.exit_code == 0, result.output
+    assert captured["ran"] is True
+    assert captured["runner_type"].value == "subprocess"
+    assert captured["config"].orchestration_mode == "runner"
+    assert captured["config"].generator_runner_order == ["claude", "codex"]
+    assert captured["config"].planner_runner_order == ["codex"]
 
 
 # ── `harness animation-theme` ────────────────────────────────────────────────

@@ -19,6 +19,7 @@ conda create -n harness python=3.12 -y && conda activate harness
 pip install -e ".[all-providers]"
 
 # 2. Start a new project — interactive, no config editing needed
+harness setup                  # optional: first-time runner rotation policy
 harness new --claude-code        # Claude Code (subscription by default)
 harness new --claude-sdk         # Claude Code via SDK (structured output)
 harness new --claude-code --model sonnet
@@ -112,6 +113,24 @@ The harness has **two coding agents** that drive all implementation work, and **
 | 6 | **OpenRouter API** | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` | OpenRouter's OpenAI-compatible Anthropic endpoint. Use for any model OpenRouter exposes. |
 
 The harness does **not** auto-export these env vars; set them in your shell, in `direnv`, or in a project's `.env` and Claude Code / Codex will pick them up.
+
+### First-Time Setup and Runner Rotation
+
+`harness setup` saves a reusable runner policy at `~/.harness/setup.json`. New and imported projects copy that policy into `harness_config.json`, so the workflow can rotate from one coding agent to the next when a usage cap is hit.
+
+```bash
+harness setup \
+  --profile claude:subprocess:sonnet \
+  --profile codex:codex:gpt-5.2 \
+  --profile claude-openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter \
+  --profile-env claude-openrouter:ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+  --profile-env 'claude-openrouter:ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY' \
+  --planner-order codex,claude \
+  --generator-order claude,codex,claude-openrouter \
+  --evaluator-order codex,claude-openrouter
+```
+
+Each role order is a whitelist and priority list. For example, the generator can start on Claude Code subscription, fall back to Codex subscription, then fall back to Claude Code routed through OpenRouter. Env values beginning with `$` are expanded at runtime, so the setup file can reference secrets without storing them directly.
 
 ### Picking a mode
 
@@ -356,6 +375,13 @@ Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`
   "codex_oss": false,
   "codex_local_provider": null,
   "code_runner_extra_args": [],
+  "code_runner_env": {},
+  "runner_profiles": [],
+  "planner_runner_order": [],
+  "generator_runner_order": [],
+  "evaluator_runner_order": [],
+  "reviewer_runner_order": [],
+  "fallback_on_rate_limit": true,
   "progress_animation": "sparkle",
   "progress_phrase_style": "playful",
   "progress_text_effect": "typewriter",

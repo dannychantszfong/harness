@@ -24,6 +24,27 @@ class EvaluatorWeights(BaseModel):
             raise ValueError(f"Evaluator weights must sum to 1.0, got {total}")
 
 
+class RunnerProfile(BaseModel):
+    """A named coding-agent runtime users can place in role fallback chains."""
+
+    name: str
+    runner: Literal["subprocess", "sdk", "codex"]
+    model: Optional[str] = None
+    provider: Literal[
+        "subscription",
+        "anthropic_api",
+        "openai_api",
+        "openrouter",
+        "gemini",
+        "custom",
+    ] = "subscription"
+    env: dict[str, str] = Field(default_factory=dict)
+    extra_args: list[str] = Field(default_factory=list)
+    codex_oss: bool = False
+    codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
+    enabled: bool = True
+
+
 class HarnessConfig(BaseModel):
     project_name: str
     brief: str
@@ -108,6 +129,17 @@ class HarnessConfig(BaseModel):
     codex_oss: bool = False
     codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
     code_runner_extra_args: list[str] = Field(default_factory=list)
+    code_runner_env: dict[str, str] = Field(default_factory=dict)
+
+    # Optional role-aware runner rotation. Each order is a whitelist: the
+    # orchestrator tries profiles in order and moves to the next profile when
+    # the current runner reports a usage cap.
+    runner_profiles: list[RunnerProfile] = Field(default_factory=list)
+    planner_runner_order: list[str] = Field(default_factory=list)
+    generator_runner_order: list[str] = Field(default_factory=list)
+    evaluator_runner_order: list[str] = Field(default_factory=list)
+    reviewer_runner_order: list[str] = Field(default_factory=list)
+    fallback_on_rate_limit: bool = True
 
     # API-provider keys. These do NOT spawn standalone runners. They are
     # consumed by the three agentic runners as their underlying models:

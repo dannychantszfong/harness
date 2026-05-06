@@ -32,6 +32,10 @@ from harness.context.handoff import HandoffDocument
 from harness.progress.tracker import ProgressTracker
 from harness.progress.models import ProjectProgress, EvaluationResult
 from harness.project_git import sync_project_git
+from harness.runner_profiles import (
+    runner_for_profile,
+    role_profiles,
+)
 from harness.session.opener import SessionOpener
 
 console = Console()
@@ -65,6 +69,12 @@ class Orchestrator:
         "project_git_remote",
         "project_github_repo",
         "project_github_private",
+        "runner_profiles",
+        "planner_runner_order",
+        "generator_runner_order",
+        "evaluator_runner_order",
+        "reviewer_runner_order",
+        "fallback_on_rate_limit",
     )
 
     def __init__(self, config: HarnessConfig, runner_type: RunnerType | None = None) -> None:
@@ -82,6 +92,8 @@ class Orchestrator:
         # Resolve runner: explicit arg > config value > default (subprocess)
         _rt = runner_type or RunnerType(config.code_runner or "subprocess")
         self.runner = create_runner(_rt, config)
+        self._role_profile_index: dict[str, int] = {}
+        self._role_runner_cache: dict[tuple[str, int], object] = {}
         self._print_runner_status()
 
     # ------------------------------------------------------------------
@@ -154,8 +166,10 @@ class Orchestrator:
         except Exception:
             pass
 
-        reviewer = ReviewerAgent(self.config, runner=self._agent_runner())
-        reviewer.review(progress=progress)
+        self._with_role_fallback(
+            "reviewer",
+            lambda runner: ReviewerAgent(self.config, runner=runner).review(progress=progress),
+        )
 
         review_path = Path(self.config.output_dir) / "REVIEW.md"
         console.print(
@@ -169,21 +183,26 @@ class Orchestrator:
     def _handle_rate_limit(self, exc: RunnerRateLimitedError) -> None:
         """Print a friendly notice and (optionally) schedule auto-resume."""
         from datetime import datetime, timezone
-        local_reset = exc.reset_at.astimezone()
-        wait = exc.reset_at - datetime.now(timezone.utc)
-        hours, rem = divmod(int(wait.total_seconds()), 3600)
-        minutes = rem // 60
-        wait_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
-
-        body_lines = [
-            "[yellow]Subscription usage cap reached.[/yellow]",
-            f"  Resets at [bold]{local_reset.strftime('%Y-%m-%d %H:%M %Z')}[/bold] "
-            f"(in [bold]{wait_str}[/bold])",
-            "",
-        ]
+        body_lines = ["[yellow]Runner usage cap reached.[/yellow]"]
+        if exc.reset_at is not None:
+            local_reset = exc.reset_at.astimezone()
+            wait = exc.reset_at - datetime.now(timezone.utc)
+            hours, rem = divmod(int(wait.total_seconds()), 3600)
+            minutes = rem // 60
+            wait_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+            body_lines.extend([
+                f"  Resets at [bold]{local_reset.strftime('%Y-%m-%d %H:%M %Z')}[/bold] "
+                f"(in [bold]{wait_str}[/bold])",
+                "",
+            ])
+        else:
+            body_lines.extend([
+                "  The runner did not report a reset time.",
+                "",
+            ])
 
         scheduled = None
-        if self.config.auto_resume_on_rate_limit:
+        if exc.reset_at is not None and self.config.auto_resume_on_rate_limit:
             try:
                 scheduled = auto_resume.schedule(
                     project_dir=Path(self.config.output_dir),
@@ -193,7 +212,7 @@ class Orchestrator:
             except Exception as e:  # scheduling is best-effort
                 body_lines.append(f"[red]Could not schedule auto-resume:[/red] {e}")
 
-        if scheduled:
+        if scheduled and exc.reset_at is not None:
             body_lines.append(
                 f"[green]Auto-resume scheduled[/green] for "
                 f"[bold]{scheduled['fire_local'].strftime('%H:%M %Z')}[/bold] "
@@ -203,9 +222,15 @@ class Orchestrator:
             body_lines.append(
                 f"  Cancel: [dim]launchctl bootout gui/$(id -u)/{scheduled['label']}[/dim]"
             )
-        else:
+        elif exc.reset_at is not None:
             body_lines.append(
                 f"To continue manually after reset, run:\n"
+                f"  [bold]harness resume {self.config.output_dir}[/bold]"
+            )
+        else:
+            body_lines.append(
+                "No reset time was reported. Fix auth/quota or wait for the "
+                "provider cap to clear, then run:\n"
                 f"  [bold]harness resume {self.config.output_dir}[/bold]"
             )
 
@@ -219,18 +244,27 @@ class Orchestrator:
     # Phase implementations
     # ------------------------------------------------------------------
 
-    def _agent_runner(self):
+    def _agent_runner(self, role: str = "planner"):
         """Return the runner to pass to orchestration agents (planner/evaluator/initializer).
 
         In 'runner' mode all agents share the same runner.
         In 'api' mode they get None and use the Anthropic API directly.
         """
-        return self.runner if self.config.orchestration_mode == "runner" else None
+        if self.config.orchestration_mode != "runner":
+            return None
+        if self.config.runner_profiles:
+            return self._runner_for_role(role)
+        return self.runner
 
     def _initialize(self, confirmed_spec: str | None = None) -> ProjectProgress:
         console.print("\n[bold blue]Phase 1: Initialize[/bold blue]")
-        agent = InitializerAgent(self.config, runner=self._agent_runner())
-        return agent.run(brief=self.config.brief, spec=confirmed_spec)
+        return self._with_role_fallback(
+            "initializer",
+            lambda runner: InitializerAgent(self.config, runner=runner).run(
+                brief=self.config.brief,
+                spec=confirmed_spec,
+            ),
+        )
 
     def _plan(
         self,
@@ -284,18 +318,23 @@ class Orchestrator:
             self.tracker.save(progress)
             return progress
 
-        agent = PlannerAgent(self.config, runner=self._agent_runner())
-        spec = agent.run(brief=self.config.brief)
+        holder = {}
+
+        def _run_planner(runner):
+            agent = PlannerAgent(self.config, runner=runner)
+            holder["agent"] = agent
+            return agent.run(brief=self.config.brief)
+
+        spec = self._with_role_fallback("planner", _run_planner)
         progress.spec = spec
         self.tracker.save(progress)
-        self._account_tokens(agent.usage.total_tokens)
+        agent = holder.get("agent")
+        if agent is not None:
+            self._account_tokens(agent.usage.total_tokens)
         return progress
 
     def _feature_loop(self, progress: ProjectProgress) -> None:
         console.print("\n[bold blue]Phase 3: Feature implementation loop[/bold blue]")
-
-        generator = GeneratorAgent(self.config, runner=self.runner)
-        evaluator = EvaluatorAgent(self.config, runner=self._agent_runner())
 
         handoff = HandoffDocument.load_latest(Path(self.config.output_dir))
 
@@ -324,7 +363,10 @@ class Orchestrator:
             # Negotiate sprint contract (once per feature)
             if self.config.sprint_contract_enabled and feature.sprint_contract is None:
                 console.print("  Negotiating sprint contract...")
-                contract = generator.negotiate_sprint_contract(
+                contract = GeneratorAgent(
+                    self.config,
+                    runner=self._agent_runner("generator") or self.runner,
+                ).negotiate_sprint_contract(
                     feature=feature,
                     spec=progress.spec or self.config.brief,
                 )
@@ -346,22 +388,42 @@ class Orchestrator:
                 console.print(f"  [cyan]Iteration {iteration}[/cyan]")
 
                 # Generate
-                self_eval = generator.implement_feature(
-                    feature=feature,
-                    progress=progress,
-                    session_preamble=session_ctx,
-                    evaluator_feedback=evaluator_feedback,
-                    iteration=iteration,
-                )
-                self._account_tokens(generator.usage.total_tokens)
+                gen_holder = {}
 
-                # Evaluate
-                result: EvaluationResult = evaluator.evaluate(
-                    feature=feature,
-                    generator_self_eval=self_eval,
-                    iteration=iteration,
+                def _generate(runner):
+                    agent = GeneratorAgent(self.config, runner=runner or self.runner)
+                    gen_holder["agent"] = agent
+                    return agent.implement_feature(
+                        feature=feature,
+                        progress=progress,
+                        session_preamble=session_ctx,
+                        evaluator_feedback=evaluator_feedback,
+                        iteration=iteration,
+                    )
+
+                self_eval = self._with_role_fallback("generator", _generate)
+                gen_agent = gen_holder.get("agent")
+                if gen_agent is not None:
+                    self._account_tokens(gen_agent.usage.total_tokens)
+
+                eval_holder = {}
+
+                def _evaluate(runner):
+                    agent = EvaluatorAgent(self.config, runner=runner)
+                    eval_holder["agent"] = agent
+                    return agent.evaluate(
+                        feature=feature,
+                        generator_self_eval=self_eval,
+                        iteration=iteration,
+                    )
+
+                result: EvaluationResult = self._with_role_fallback(
+                    "evaluator",
+                    _evaluate,
                 )
-                self._account_tokens(evaluator.usage.total_tokens)
+                eval_agent = eval_holder.get("agent")
+                if eval_agent is not None:
+                    self._account_tokens(eval_agent.usage.total_tokens)
 
                 self._print_eval_summary(result)
 
@@ -444,11 +506,69 @@ class Orchestrator:
                 changes[field] = (old, new)
 
         if changes:
+            if any(
+                field in changes for field in (
+                    "runner_profiles",
+                    "planner_runner_order",
+                    "generator_runner_order",
+                    "evaluator_runner_order",
+                    "reviewer_runner_order",
+                )
+            ):
+                self._role_profile_index.clear()
+                self._role_runner_cache.clear()
             lines = [f"[cyan]{CONFIG_FILENAME} changed — applying live:[/cyan]"]
             for field, (old, new) in changes.items():
                 lines.append(f"  [dim]{field}:[/dim] {old} → [bold]{new}[/bold]")
             console.print("\n".join(lines))
         return changes
+
+    def _with_role_fallback(self, role: str, call):
+        """Run one role call, rotating profiles when a runner reports a cap."""
+        while True:
+            runner = self._agent_runner(role)
+            try:
+                return call(runner)
+            except RunnerRateLimitedError as exc:
+                if self._advance_role_runner(role, exc):
+                    continue
+                raise
+
+    def _runner_for_role(self, role: str):
+        profiles = role_profiles(self.config, role)
+        if not profiles:
+            return self.runner
+
+        index = min(self._role_profile_index.get(role, 0), len(profiles) - 1)
+        self._role_profile_index[role] = index
+        key = (role, index)
+        if key not in self._role_runner_cache:
+            self._role_runner_cache[key] = runner_for_profile(self.config, profiles[index])
+        return self._role_runner_cache[key]
+
+    def _advance_role_runner(self, role: str, exc: RunnerRateLimitedError) -> bool:
+        if not self.config.fallback_on_rate_limit or not self.config.runner_profiles:
+            return False
+
+        profiles = role_profiles(self.config, role)
+        current = self._role_profile_index.get(role, 0)
+        next_index = current + 1
+        if next_index >= len(profiles):
+            return False
+
+        old = profiles[current]
+        new = profiles[next_index]
+        self._role_profile_index[role] = next_index
+        reset = f" Resets at {exc.reset_at.astimezone().strftime('%Y-%m-%d %H:%M %Z')}." if exc.reset_at else ""
+        console.print(
+            Panel(
+                f"[yellow]{role} runner capped:[/yellow] {old.name} ({old.runner}).{reset}\n"
+                f"Switching to [bold]{new.name}[/bold] ({new.runner}).",
+                title="[cyan]Runner fallback[/cyan]",
+                border_style="cyan",
+            )
+        )
+        return True
 
     def _sync_project_git(self, reason: str) -> None:
         result = sync_project_git(self.config, reason=reason)
@@ -501,6 +621,24 @@ class Orchestrator:
     def _print_runner_status(self) -> None:
         """Run preflight check and print a clear status banner. Abort on failure."""
         from rich.panel import Panel as RichPanel
+        if self.config.runner_profiles:
+            lines = ["[bold]Runner rotation enabled[/bold]"]
+            for role in ("planner", "generator", "evaluator", "reviewer"):
+                profiles = role_profiles(self.config, role)
+                order = " → ".join(
+                    f"{p.name} ({p.runner}{f'/{p.model}' if p.model else ''})"
+                    for p in profiles
+                )
+                lines.append(f"[dim]{role}:[/dim] {order or 'default runner'}")
+            console.print(
+                RichPanel(
+                    "\n".join(lines),
+                    title="[green]✓ Runner policy ready[/green]",
+                    border_style="green",
+                )
+            )
+            return
+
         pf = self.runner.preflight()
 
         if not pf.ok:

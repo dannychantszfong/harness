@@ -7,9 +7,19 @@ from rich.panel import Panel
 from rich.table import Table
 from pathlib import Path
 
-from harness.config import CONFIG_FILENAME, HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile
 from harness.orchestrator import Orchestrator
 from harness.progress.tracker import ProgressTracker
+from harness.runner_profiles import (
+    HarnessSetup,
+    apply_setup_defaults,
+    default_runner_from_setup,
+    default_setup_path,
+    load_setup,
+    runner_for_profile,
+    role_profiles,
+    save_setup,
+)
 from harness.runners.base import RunnerType
 
 console = Console()
@@ -218,6 +228,199 @@ def _print_project_git_sync_result(result) -> None:
     )
 
 
+def _apply_saved_setup(config: HarnessConfig) -> None:
+    setup = load_setup()
+    if setup and apply_setup_defaults(config, setup):
+        console.print(f"[dim]Loaded runner setup from {default_setup_path()}[/dim]")
+
+
+def _resolve_new_runner(
+    named: RunnerType | None,
+    runner_flag: str | None,
+    setup: HarnessSetup | None,
+) -> RunnerType:
+    if named:
+        return named
+    if runner_flag:
+        return RunnerType(runner_flag)
+    setup_runner = default_runner_from_setup(setup)
+    if setup_runner:
+        console.print(f"[dim]Using runner from setup: {setup_runner.value}[/dim]")
+        return setup_runner
+    return _prompt_runner()
+
+
+def _parse_profile(value: str) -> RunnerProfile:
+    parts = value.split(":")
+    if len(parts) < 2:
+        raise click.UsageError("--profile must use name:runner[:model[:provider]]")
+    name, runner = parts[0].strip(), parts[1].strip()
+    if not name:
+        raise click.UsageError("Profile name cannot be empty.")
+    model = parts[2].strip() or None if len(parts) >= 3 else None
+    provider = parts[3].strip() if len(parts) >= 4 and parts[3].strip() else "subscription"
+    if runner not in RunnerType.choices():
+        raise click.UsageError(f"Unknown runner in profile {name!r}: {runner}")
+    try:
+        return RunnerProfile(name=name, runner=runner, model=model, provider=provider)
+    except Exception as exc:
+        raise click.UsageError(f"Invalid profile {name!r}: {exc}") from exc
+
+
+def _parse_csv_order(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _build_setup_from_options(
+    profiles: tuple[str, ...],
+    profile_envs: tuple[str, ...],
+    profile_extra_args: tuple[str, ...],
+    planner_order: str | None,
+    generator_order: str | None,
+    evaluator_order: str | None,
+    reviewer_order: str | None,
+    fallback_on_rate_limit: bool,
+) -> HarnessSetup:
+    parsed = [_parse_profile(value) for value in profiles]
+    by_name = {profile.name: profile for profile in parsed}
+    if len(by_name) != len(parsed):
+        raise click.UsageError("Profile names must be unique.")
+
+    for item in profile_envs:
+        if ":" not in item or "=" not in item:
+            raise click.UsageError("--profile-env must use profile:KEY=VALUE")
+        profile_name, assignment = item.split(":", 1)
+        key, value = assignment.split("=", 1)
+        if profile_name not in by_name:
+            raise click.UsageError(f"Unknown profile for --profile-env: {profile_name}")
+        by_name[profile_name].env[key] = value
+
+    for item in profile_extra_args:
+        if ":" not in item:
+            raise click.UsageError("--profile-extra-arg must use profile:ARG")
+        profile_name, arg = item.split(":", 1)
+        if profile_name not in by_name:
+            raise click.UsageError(f"Unknown profile for --profile-extra-arg: {profile_name}")
+        by_name[profile_name].extra_args.append(arg)
+
+    names = [profile.name for profile in parsed]
+    generator = _parse_csv_order(generator_order) or names
+    planner = _parse_csv_order(planner_order) or generator
+    evaluator = _parse_csv_order(evaluator_order) or generator
+    reviewer = _parse_csv_order(reviewer_order) or evaluator
+
+    known = set(names)
+    for label, order in {
+        "planner": planner,
+        "generator": generator,
+        "evaluator": evaluator,
+        "reviewer": reviewer,
+    }.items():
+        missing = [name for name in order if name not in known]
+        if missing:
+            raise click.UsageError(f"{label} order references unknown profiles: {', '.join(missing)}")
+
+    return HarnessSetup(
+        runner_profiles=parsed,
+        planner_runner_order=planner,
+        generator_runner_order=generator,
+        evaluator_runner_order=evaluator,
+        reviewer_runner_order=reviewer,
+        fallback_on_rate_limit=fallback_on_rate_limit,
+    )
+
+
+def _interactive_setup() -> HarnessSetup:
+    console.print(
+        Panel(
+            "Define the priority order Harness should use when runners hit usage caps.",
+            title="[blue]Harness Setup[/blue]",
+            border_style="blue",
+        )
+    )
+    order = click.prompt(
+        "Default runner order",
+        default="claude,codex",
+    )
+    names = _parse_csv_order(order)
+    profiles: list[RunnerProfile] = []
+    for name in names:
+        if name in {"claude", "claude-code"}:
+            model = click.prompt("Claude Code model", default="", show_default=False).strip() or None
+            profiles.append(RunnerProfile(name="claude", runner="subprocess", model=model))
+        elif name == "sdk":
+            model = click.prompt("Claude SDK model", default="", show_default=False).strip() or None
+            profiles.append(RunnerProfile(name="sdk", runner="sdk", model=model))
+        elif name == "codex":
+            model = click.prompt("Codex model", default="", show_default=False).strip() or None
+            profiles.append(RunnerProfile(name="codex", runner="codex", model=model))
+        else:
+            runner_value = click.prompt(
+                f"Runner for profile {name}",
+                type=click.Choice(RunnerType.choices(), case_sensitive=False),
+                default="subprocess",
+            )
+            model = click.prompt(f"Model for {name}", default="", show_default=False).strip() or None
+            profiles.append(RunnerProfile(name=name, runner=runner_value, model=model))
+
+    if click.confirm("Add Claude Code via OpenRouter as an API fallback?", default=False):
+        model = click.prompt(
+            "OpenRouter model",
+            default="anthropic/claude-sonnet-4-6",
+        )
+        profiles.append(RunnerProfile(
+            name="claude-openrouter",
+            runner="subprocess",
+            model=model,
+            provider="openrouter",
+            env={
+                "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1",
+                "ANTHROPIC_AUTH_TOKEN": "$OPENROUTER_API_KEY",
+            },
+        ))
+        names.append("claude-openrouter")
+
+    default_order = ",".join(names)
+    planner = _parse_csv_order(click.prompt("Planner order", default=default_order))
+    generator = _parse_csv_order(click.prompt("Coding/generator order", default=default_order))
+    evaluator = _parse_csv_order(click.prompt("Evaluator order", default=default_order))
+    reviewer = _parse_csv_order(click.prompt("Reviewer order", default=",".join(evaluator)))
+    return HarnessSetup(
+        runner_profiles=profiles,
+        planner_runner_order=planner,
+        generator_runner_order=generator,
+        evaluator_runner_order=evaluator,
+        reviewer_runner_order=reviewer,
+        fallback_on_rate_limit=True,
+    )
+
+
+def _print_setup(setup: HarnessSetup, path: Path) -> None:
+    table = Table(title=f"Harness Setup: {path}", show_header=True, header_style="bold cyan")
+    table.add_column("Profile", style="bold")
+    table.add_column("Runner")
+    table.add_column("Model")
+    table.add_column("Provider")
+    table.add_column("Env", style="dim")
+    for profile in setup.runner_profiles:
+        table.add_row(
+            profile.name,
+            profile.runner,
+            profile.model or "default",
+            profile.provider,
+            ", ".join(profile.env.keys()) or "-",
+        )
+    console.print(table)
+    console.print(
+        f"[dim]planner:[/dim] {', '.join(setup.planner_runner_order)}\n"
+        f"[dim]generator:[/dim] {', '.join(setup.generator_runner_order)}\n"
+        f"[dim]evaluator:[/dim] {', '.join(setup.evaluator_runner_order)}\n"
+        f"[dim]reviewer:[/dim] {', '.join(setup.reviewer_runner_order)}"
+    )
+
+
 def _require_anthropic_key_for_api_mode(orchestration_mode: str) -> None:
     """Abort with a clear message if API orchestration mode needs a key that isn't set."""
     import os
@@ -321,6 +524,70 @@ def _runner_flags(f):
 
 
 @main.command()
+@click.option("--config", "config_path", type=click.Path(), default=None,
+              help="Setup file to read/write. Defaults to ~/.harness/setup.json.")
+@click.option("--profile", "profiles", multiple=True,
+              help="Runner profile as name:runner[:model[:provider]]. Can be repeated.")
+@click.option("--profile-env", "profile_envs", multiple=True,
+              help="Per-profile env as profile:KEY=VALUE. Values like $OPENROUTER_API_KEY are expanded at runtime.")
+@click.option("--profile-extra-arg", "profile_extra_args", multiple=True,
+              help="Extra CLI arg for a profile as profile:ARG. Can be repeated.")
+@click.option("--planner-order", default=None, help="Comma-separated profile order for planning.")
+@click.option("--generator-order", default=None, help="Comma-separated profile order for coding.")
+@click.option("--evaluator-order", default=None, help="Comma-separated profile order for evaluation.")
+@click.option("--reviewer-order", default=None, help="Comma-separated profile order for review.")
+@click.option("--fallback-on-rate-limit/--no-fallback-on-rate-limit", default=True,
+              help="Rotate to the next profile when the active runner reports a usage cap.")
+@click.option("--show", is_flag=True, default=False, help="Show the saved setup.")
+def setup(
+    config_path: str | None,
+    profiles: tuple[str, ...],
+    profile_envs: tuple[str, ...],
+    profile_extra_args: tuple[str, ...],
+    planner_order: str | None,
+    generator_order: str | None,
+    evaluator_order: str | None,
+    reviewer_order: str | None,
+    fallback_on_rate_limit: bool,
+    show: bool,
+):
+    """Configure first-run runner rotation and fallback policy."""
+    path = Path(config_path).expanduser() if config_path else default_setup_path()
+
+    has_noninteractive_input = bool(
+        profiles or profile_envs or profile_extra_args
+        or planner_order or generator_order or evaluator_order or reviewer_order
+    )
+    if show and not has_noninteractive_input:
+        saved = load_setup(path)
+        if saved is None:
+            console.print(f"[yellow]No setup file found at {path}.[/yellow]")
+            return
+        _print_setup(saved, path)
+        return
+
+    if has_noninteractive_input:
+        if not profiles:
+            raise click.UsageError("--profile is required when using non-interactive setup options.")
+        setup_config = _build_setup_from_options(
+            profiles=profiles,
+            profile_envs=profile_envs,
+            profile_extra_args=profile_extra_args,
+            planner_order=planner_order,
+            generator_order=generator_order,
+            evaluator_order=evaluator_order,
+            reviewer_order=reviewer_order,
+            fallback_on_rate_limit=fallback_on_rate_limit,
+        )
+    else:
+        setup_config = _interactive_setup()
+
+    saved_path = save_setup(setup_config, path)
+    console.print(f"[green]Harness setup saved:[/green] {saved_path}")
+    _print_setup(setup_config, saved_path)
+
+
+@main.command()
 @click.option(
     "--runner", "-r",
     type=click.Choice([r[0] for r in _RUNNER_TABLE], case_sensitive=False),
@@ -396,12 +663,8 @@ def new(runner: str | None, with_api: bool, model: str | None,
     named = _pick_runner_from_flags(
         claude_code=claude_code, claude_sdk=claude_sdk, codex=codex,
     )
-    if named:
-        runner_type = named
-    elif runner:
-        runner_type = RunnerType(runner)
-    else:
-        runner_type = _prompt_runner()
+    saved_setup = None if (with_api or named or runner) else load_setup()
+    runner_type = _resolve_new_runner(named, runner, saved_setup)
 
     # ── Step 2: Derive orchestration mode and validate keys up front ──────
     # All current runners default to "runner" mode. --with-api opts the
@@ -410,7 +673,10 @@ def new(runner: str | None, with_api: bool, model: str | None,
     orchestration_mode = "api" if with_api else "runner"
     _require_anthropic_key_for_api_mode(orchestration_mode)
 
-    code_model = _resolve_model_choice(runner_type, model)
+    if model is not None or not (saved_setup and saved_setup.runner_profiles):
+        code_model = _resolve_model_choice(runner_type, model)
+    else:
+        code_model = None
 
     # ── Step 3: Collect project name and brief ────────────────────────────
     project_name: str = click.prompt("Project name").strip()
@@ -434,6 +700,8 @@ def new(runner: str | None, with_api: bool, model: str | None,
         orchestration_mode=orchestration_mode,
         code_runner=runner_type.value,
     )
+    if saved_setup:
+        apply_setup_defaults(config, saved_setup)
     _apply_model_override(config, runner_type, code_model)
     _apply_project_git_options(config, github_repo, git_remote, github_private, no_git_push)
 
@@ -442,7 +710,13 @@ def new(runner: str | None, with_api: bool, model: str | None,
 
     # ── Step 6: In runner mode the planner needs a runner instance ────────
     from harness.runners import create_runner
-    planner_runner = create_runner(runner_type, config) if orchestration_mode == "runner" else None
+    planner_runner = None
+    if config.orchestration_mode == "runner":
+        planner_profiles = role_profiles(config, "planner")
+        planner_runner = (
+            runner_for_profile(config, planner_profiles[0])
+            if planner_profiles else create_runner(runner_type, config)
+        )
 
     # ── Step 7: Requirement alignment with planner ────────────────────────
     from harness.agents.planner import PlannerAgent
@@ -485,6 +759,8 @@ def new(runner: str | None, with_api: bool, model: str | None,
 def run(config_file: str, runner: str | None, model: str | None):
     """Run the full harness for a project defined in CONFIG_FILE."""
     config = HarnessConfig.from_yaml(config_file)
+    if runner is None:
+        _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
 
     console.print(
@@ -495,6 +771,8 @@ def run(config_file: str, runner: str | None, model: str | None):
     )
 
     runner_type = _resolve_runner(config, runner)
+    if runner is not None:
+        config.runner_profiles = []
     _apply_model_override(config, runner_type, model)
 
     orchestrator = Orchestrator(config, runner_type=runner_type)
@@ -533,6 +811,8 @@ def resume(project_dir: str, runner: str | None, model: str | None):
         raise SystemExit(1)
 
     config = HarnessConfig.from_yaml(config_path)
+    if runner is None:
+        _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
 
     console.print(
@@ -584,6 +864,8 @@ def resume(project_dir: str, runner: str | None, model: str | None):
             )
 
     runner_type = _resolve_runner(config, runner)
+    if runner is not None:
+        config.runner_profiles = []
     _apply_model_override(config, runner_type, model)
     orchestrator = Orchestrator(config, runner_type=runner_type)
     orchestrator.run()
@@ -707,7 +989,11 @@ def import_repo(
         ))
 
     # ── Step 3: Resolve runner ────────────────────────────────────────────
-    runner_type = RunnerType(runner) if runner else _prompt_runner()
+    saved_setup = load_setup()
+    runner_type = (
+        RunnerType(runner)
+        if runner else default_runner_from_setup(saved_setup) or _prompt_runner()
+    )
     orchestration_mode = _default_orchestration_mode(runner_type)
     _require_anthropic_key_for_api_mode(orchestration_mode)
 
@@ -744,6 +1030,8 @@ def import_repo(
         config.save_yaml(cfg_path)
 
     _apply_model_override(config, runner_type, model)
+    if runner is None:
+        apply_setup_defaults(config, saved_setup)
     _apply_project_git_options(config, github_repo, git_remote, github_private, no_git_push)
     config.save_yaml(cfg_path)
 
@@ -769,7 +1057,11 @@ def import_repo(
         from harness.runners import create_runner
 
         console.print("[dim]Asking the runner to inspect the repo for existing spec material...[/dim]")
-        assessment_runner = create_runner(runner_type, config)
+        assessment_profiles = role_profiles(config, "planner")
+        assessment_runner = (
+            runner_for_profile(config, assessment_profiles[0])
+            if assessment_profiles else create_runner(runner_type, config)
+        )
         try:
             assessment = assess_repo_spec_with_agent(
                 assessment_runner,
@@ -964,6 +1256,7 @@ def status(config_file: str):
 def init(config_file: str, brief: str, project_name: str | None):
     """Initialize a new project (features.json, init.sh, first git commit)."""
     config = HarnessConfig.from_yaml(config_file)
+    _apply_saved_setup(config)
     if project_name:
         config.project_name = project_name
     config.brief = brief
@@ -971,7 +1264,16 @@ def init(config_file: str, brief: str, project_name: str | None):
     from harness.agents import InitializerAgent
     from harness.project_git import sync_project_git
 
-    agent = InitializerAgent(config)
+    init_runner = None
+    if config.orchestration_mode == "runner":
+        init_profiles = role_profiles(config, "initializer")
+        if init_profiles:
+            init_runner = runner_for_profile(config, init_profiles[0])
+        else:
+            from harness.runners import create_runner
+            init_runner = create_runner(RunnerType(config.code_runner or "subprocess"), config)
+
+    agent = InitializerAgent(config, runner=init_runner)
     progress = agent.run(brief=brief)
     _print_project_git_sync_result(sync_project_git(config, reason="manual init"))
     console.print(
@@ -985,11 +1287,20 @@ def init(config_file: str, brief: str, project_name: str | None):
 def plan(config_file: str):
     """Run only the planner agent to expand the brief into a spec."""
     config = HarnessConfig.from_yaml(config_file)
+    _apply_saved_setup(config)
     tracker = ProgressTracker(config)
     progress = tracker.load()
 
     from harness.agents import PlannerAgent
-    agent = PlannerAgent(config)
+    planner_runner = None
+    if config.orchestration_mode == "runner":
+        planner_profiles = role_profiles(config, "planner")
+        if planner_profiles:
+            planner_runner = runner_for_profile(config, planner_profiles[0])
+        else:
+            from harness.runners import create_runner
+            planner_runner = create_runner(RunnerType(config.code_runner or "subprocess"), config)
+    agent = PlannerAgent(config, runner=planner_runner)
     spec = agent.run(brief=config.brief)
     progress.spec = spec
     tracker.save(progress)

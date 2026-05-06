@@ -7,6 +7,41 @@
 
 ## CLI Commands
 
+### `harness setup`
+
+Configure first-time runner rotation. The saved policy is copied into new/imported projects and can also be applied on resume when a project has no local policy yet.
+
+```bash
+harness setup
+
+harness setup \
+  --profile claude:subprocess:sonnet \
+  --profile codex:codex:gpt-5.2 \
+  --profile claude-openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter \
+  --profile-env claude-openrouter:ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+  --profile-env 'claude-openrouter:ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY' \
+  --planner-order codex,claude \
+  --generator-order claude,codex,claude-openrouter \
+  --evaluator-order codex,claude-openrouter
+
+harness setup --show
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--profile name:runner[:model[:provider]]` | Define a named runner profile |
+| `--profile-env profile:KEY=VALUE` | Add env vars for a profile; `$ENV_NAME` expands at runtime |
+| `--profile-extra-arg profile:ARG` | Add one extra CLI argument for that profile |
+| `--planner-order` | Comma-separated whitelist/priority list for planning |
+| `--generator-order` | Comma-separated whitelist/priority list for coding |
+| `--evaluator-order` | Comma-separated whitelist/priority list for evaluation |
+| `--reviewer-order` | Comma-separated whitelist/priority list for whole-project review |
+| `--no-fallback-on-rate-limit` | Disable automatic rotation on usage caps |
+
+---
+
 ### `harness new`
 
 Create a new output project interactively, confirm a product spec, then start the full workflow.
@@ -185,6 +220,12 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 | `generator_model` | str | `"claude-opus-4-7"` | Reserved for `orchestration_mode='api'` |
 | `evaluator_model` | str | `"claude-opus-4-7"` | Model for EvaluatorAgent in `orchestration_mode='api'` |
 | `code_runner_model` | str\|None | `None` | Model passed to Claude Code / Codex as `--model` |
+| `runner_profiles` | list | `[]` | Named runner/model/env profiles used for role-aware rotation |
+| `planner_runner_order` | list[str] | `[]` | Planner profile whitelist and priority order |
+| `generator_runner_order` | list[str] | `[]` | Generator profile whitelist and priority order |
+| `evaluator_runner_order` | list[str] | `[]` | Evaluator profile whitelist and priority order |
+| `reviewer_runner_order` | list[str] | `[]` | Reviewer profile whitelist and priority order |
+| `fallback_on_rate_limit` | bool | `True` | Move to the next role profile when the current runner reports a usage cap |
 | `openai_api_key` | str\|None | `None` | Documents the OpenAI key the project expects (set `OPENAI_API_KEY` env var to use it) |
 | `gemini_api_key` | str\|None | `None` | Documents the Gemini key the project expects (set `GEMINI_API_KEY` env var) |
 | `openrouter_api_key` | str\|None | `None` | Documents the OpenRouter key the project expects (set `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`) |

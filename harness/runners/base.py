@@ -23,25 +23,29 @@ responses while the generator still uses the runner.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import os
 from typing import Optional
 
 
 class RunnerRateLimitedError(RuntimeError):
     """Raised when a subscription runner reports its usage limit was hit.
 
-    Carries the parsed reset time (timezone-aware UTC) so the orchestrator
-    can either inform the user or schedule an auto-resume.
+    Carries the parsed reset time when the runner reports one. Some providers
+    only say that a cap was hit, so reset_at can be None.
     """
 
-    def __init__(self, reset_at: datetime, raw_message: str = ""):
+    def __init__(self, reset_at: datetime | None = None, raw_message: str = ""):
         self.reset_at = reset_at
         self.raw_message = raw_message
-        super().__init__(
-            f"Subscription rate limit hit; resets at {reset_at.isoformat()}"
-        )
+        if reset_at is not None:
+            message = f"Subscription rate limit hit; resets at {reset_at.isoformat()}"
+        else:
+            message = "Runner usage limit hit; no reset time was reported"
+        super().__init__(message)
 
 
 class RunnerType(str, Enum):
@@ -102,6 +106,7 @@ class RunResult:
     # When set, agents convert this into RunnerRateLimitedError so the
     # orchestrator can react gracefully (auto-resume) instead of crashing.
     rate_limit_reset_at: Optional[datetime] = None
+    rate_limited: bool = False
 
 
 @dataclass
@@ -119,6 +124,28 @@ class CodeRunner(ABC):
 
     def __init__(self, config) -> None:
         self.config = config
+
+    def subprocess_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        for key, value in (getattr(self.config, "code_runner_env", {}) or {}).items():
+            env[key] = _expand_env_value(value)
+        return env
+
+    @contextmanager
+    def profile_env(self):
+        extra = getattr(self.config, "code_runner_env", {}) or {}
+        old_values: dict[str, str | None] = {}
+        try:
+            for key, value in extra.items():
+                old_values[key] = os.environ.get(key)
+                os.environ[key] = _expand_env_value(value)
+            yield
+        finally:
+            for key, old in old_values.items():
+                if old is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = old
 
     @property
     @abstractmethod
@@ -138,3 +165,11 @@ class CodeRunner(ABC):
     def implement(self, prompt: str, cwd: str, timeout_seconds: int = 600) -> RunResult:
         """Run one complete implementation session for a single feature."""
         ...
+
+
+def _expand_env_value(value: str) -> str:
+    if value.startswith("${") and value.endswith("}"):
+        return os.environ.get(value[2:-1], value)
+    if value.startswith("$") and len(value) > 1:
+        return os.environ.get(value[1:], value)
+    return value

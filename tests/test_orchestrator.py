@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from harness.config import CONFIG_FILENAME, HarnessConfig
+from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile
 from harness.orchestrator import Orchestrator
 from harness.progress.models import (
     Feature,
@@ -20,6 +20,7 @@ from harness.progress.models import (
     SprintContract,
 )
 from harness.progress.tracker import ProgressTracker
+from harness.runners.base import PreflightResult, RunResult, RunnerType
 
 
 def _make_sprint_contract(feature_id: str = "f1") -> SprintContract:
@@ -163,6 +164,59 @@ class TestOrchestratorPhases:
 
             # Should stop after max_iterations even if never passing
             assert mock_gen.implement_feature.call_count == 2
+
+    def test_generator_rate_limit_rotates_to_next_profile(
+        self, tmp_config, one_feature_progress, monkeypatch
+    ):
+        tmp_config.orchestration_mode = "runner"
+        tmp_config.code_runner = "subprocess"
+        tmp_config.runner_profiles = [
+            RunnerProfile(name="claude", runner="subprocess", model="sonnet"),
+            RunnerProfile(name="codex", runner="codex", model="gpt-5.2"),
+        ]
+        tmp_config.generator_runner_order = ["claude", "codex"]
+        tmp_config.evaluator_runner_order = ["codex"]
+
+        created = {}
+
+        def fake_create_runner(runner_type, cfg):
+            runner = MagicMock()
+            runner.runner_type = runner_type
+            runner.preflight.return_value = PreflightResult(ok=True, summary="ok", details="ok")
+            key = cfg.code_runner_model or "legacy"
+            if key == "sonnet":
+                runner.implement.return_value = RunResult(
+                    output="",
+                    success=False,
+                    error="usage cap",
+                    rate_limited=True,
+                )
+            else:
+                runner.implement.return_value = RunResult(
+                    output="self eval",
+                    success=True,
+                )
+            created.setdefault(key, []).append(runner)
+            return runner
+
+        monkeypatch.setattr("harness.orchestrator.create_runner", fake_create_runner)
+        monkeypatch.setattr("harness.runner_profiles.create_runner", fake_create_runner)
+
+        orchestrator = Orchestrator(tmp_config, runner_type=RunnerType.SUBPROCESS)
+
+        with (
+            patch.object(orchestrator, "_initialize", return_value=one_feature_progress),
+            patch.object(orchestrator, "_plan", return_value=one_feature_progress),
+            patch("harness.orchestrator.EvaluatorAgent") as MockEval,
+        ):
+            mock_eval = MockEval.return_value
+            mock_eval.evaluate.return_value = _make_passing_eval()
+            mock_eval.usage = MagicMock(total_tokens=50)
+
+            orchestrator.run()
+
+        assert created["sonnet"][0].implement.call_count == 1
+        assert any(r.implement.call_count >= 1 for r in created["gpt-5.2"])
 
 
 # ── Live config reload at seams ──────────────────────────────────────────────

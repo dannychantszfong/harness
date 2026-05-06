@@ -138,7 +138,7 @@ class BaseAgent(ABC):
         cwd = str(self.config.output_path)
         result = self.runner.implement(prompt, cwd=cwd)
         if not result.success:
-            if result.rate_limit_reset_at is not None:
+            if result.rate_limited or result.rate_limit_reset_at is not None:
                 from harness.runners.base import RunnerRateLimitedError
                 raise RunnerRateLimitedError(
                     reset_at=result.rate_limit_reset_at,

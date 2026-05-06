@@ -125,6 +125,7 @@ class SubprocessRunner(CodeRunner):
                 result = subprocess.run(
                     cmd,
                     cwd=cwd,
+                    env=self.subprocess_env(),
                     capture_output=True,
                     text=True,
                     timeout=timeout_seconds,
@@ -147,6 +148,10 @@ class SubprocessRunner(CodeRunner):
             stdout_tail = (result.stdout or "").strip()[-1500:]
             combined = f"{result.stdout or ''}\n{result.stderr or ''}"
             reset_at = _parse_reset_time(combined)
+            rate_limited = (
+                reset_at is not None
+                or any(trigger in combined.lower() for trigger in _RATE_LIMIT_TRIGGERS)
+            )
             parts = [f"claude --print exited with code {result.returncode}"]
             parts.append(f"prompt size: {len(prompt)} chars")
             if stderr_tail:
@@ -160,6 +165,7 @@ class SubprocessRunner(CodeRunner):
                 success=False,
                 error="\n".join(parts),
                 rate_limit_reset_at=reset_at,
+                rate_limited=rate_limited,
             )
 
         output = result.stdout.strip()

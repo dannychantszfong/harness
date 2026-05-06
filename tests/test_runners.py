@@ -163,6 +163,32 @@ def test_subprocess_passes_configured_model(tmp_config, monkeypatch):
     assert "sonnet" in captured["args"]
 
 
+def test_subprocess_expands_profile_env(tmp_config, monkeypatch):
+    tmp_config.code_runner_env = {
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1",
+        "ANTHROPIC_AUTH_TOKEN": "$OPENROUTER_API_KEY",
+    }
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    captured = {}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "ok"
+    mock_result.stderr = ""
+
+    def fake_run(args, *a, **k):
+        captured["env"] = k.get("env")
+        return mock_result
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = SubprocessRunner(tmp_config).implement("prompt", cwd="/tmp")
+
+    assert result.success is True
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-or-test"
+
+
 def test_subprocess_no_token_data(tmp_config, monkeypatch):
     mock_result = MagicMock()
     mock_result.returncode = 0
@@ -291,6 +317,20 @@ def test_codex_nonzero_exit(tmp_config, monkeypatch):
     runner = CodexRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
     assert result.success is False
+
+
+def test_codex_rate_limit_hint_sets_flag(tmp_config, monkeypatch):
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    mock_result.stderr = "429 rate limit exceeded"
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+
+    result = CodexRunner(tmp_config).implement("prompt", cwd="/tmp")
+
+    assert result.success is False
+    assert result.rate_limited is True
 
 
 def test_codex_success(tmp_config, monkeypatch):

@@ -102,6 +102,14 @@
 > - `harness import <repo> --github-repo owner/repo` copies the source without `.git/` by default and treats the copy as an independent repo
 > - Harness pushes after initialization and after each passing feature, while keeping GitHub push failures separate from feature evaluation failures
 
+**US-23** — As a developer with multiple subscriptions/API routes, I want Harness to rotate between Claude Code, Codex, and API-backed profiles when a usage cap is hit.
+
+> Acceptance criteria:
+> - `harness setup` lets me define named runner profiles once
+> - I can set different profile orders for planning, coding, evaluation, and review
+> - When a runner reports a usage cap, Harness retries the same role with the next allowed profile
+> - Env-backed profiles can reference API keys via `$ENV_VAR` instead of storing secrets in setup JSON
+
 ---
 
 ## Epic 5: Context Management
