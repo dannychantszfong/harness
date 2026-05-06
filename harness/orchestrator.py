@@ -213,15 +213,15 @@ class Orchestrator:
                 body_lines.append(f"[red]Could not schedule auto-resume:[/red] {e}")
 
         if scheduled and exc.reset_at is not None:
+            backend = scheduled.get("backend", "scheduler")
             body_lines.append(
                 f"[green]Auto-resume scheduled[/green] for "
                 f"[bold]{scheduled['fire_local'].strftime('%H:%M %Z')}[/bold] "
-                f"via launchd label [dim]{scheduled['label']}[/dim]"
+                f"via {backend} label [dim]{scheduled['label']}[/dim]"
             )
             body_lines.append(f"  Log: {scheduled['log']}")
-            body_lines.append(
-                f"  Cancel: [dim]launchctl bootout gui/$(id -u)/{scheduled['label']}[/dim]"
-            )
+            if scheduled.get("cancel"):
+                body_lines.append(f"  Cancel: [dim]{scheduled['cancel']}[/dim]")
         elif exc.reset_at is not None:
             body_lines.append(
                 f"To continue manually after reset, run:\n"

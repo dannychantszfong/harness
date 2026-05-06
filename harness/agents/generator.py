@@ -49,6 +49,7 @@ def _build_implementation_prompt(
     session_preamble: str,
     evaluator_feedback: Optional[str],
     iteration: int,
+    startup_command: str = "bash init.sh",
 ) -> str:
     contract_block = ""
     if feature.sprint_contract:
@@ -72,7 +73,7 @@ def _build_implementation_prompt(
         f"{contract_block}"
         f"{feedback_block}\n\n"
         "When done:\n"
-        "1. Run init.sh and confirm the app starts.\n"
+        f"1. Run `{startup_command}` and confirm the app starts.\n"
         "2. Write a self-evaluation: what you built, edge cases, concerns.\n"
         "3. git add -A && git commit -m 'feat: <feature name>'\n"
         "4. Output your self-evaluation as the final message."
@@ -146,6 +147,7 @@ class GeneratorAgent(BaseAgent):
             session_preamble=session_preamble,
             evaluator_feedback=evaluator_feedback,
             iteration=iteration,
+            startup_command=self.config.startup_command_for_platform,
         )
 
         result: RunResult = self.runner.implement(

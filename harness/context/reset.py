@@ -74,8 +74,8 @@ class ContextReset:
         else:
             blocks += [
                 "## First session",
-                "No prior handoff exists. Read the features file and init.sh, "
-                "run the app, confirm it starts, then pick the highest-priority "
+                "No prior handoff exists. Read the features file, run the "
+                "configured startup command, confirm the app starts, then pick the highest-priority "
                 "pending feature to implement.",
             ]
         next_feature = progress.next_pending_feature()

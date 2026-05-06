@@ -125,7 +125,7 @@ pytest tests/ -v
 | RL-03 | Unparseable IANA zone (e.g. `Made/Up`) → returns `None` (no false trigger) | None |
 | RL-04 | Trigger phrase absent (just "resets 9pm") → `_parse_reset_time` returns `None` | None |
 | RL-05 | `_call_via_runner` raises `RunnerRateLimitedError` (not generic RuntimeError) when `rate_limit_reset_at` set | Typed exception |
-| RL-06 | Orchestrator's `run()` catches the typed exception, prints the panel, schedules launchd if `auto_resume_on_rate_limit=True`, exits clean | No traceback, plist written |
+| RL-06 | Orchestrator's `run()` catches the typed exception, prints the panel, schedules via the platform backend if `auto_resume_on_rate_limit=True`, exits clean | No traceback, schedule artifact written |
 
 ---
 

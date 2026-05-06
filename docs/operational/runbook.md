@@ -228,7 +228,7 @@ The harness does NOT auto-export from `harness_config.json` — set the env vars
 ### INC-07: Subscription rate limit hit mid-run
 **Symptom:** Rich panel "Paused — rate limit" with a reset time; orchestrator exits cleanly, unless a runner profile fallback is available
 **Cause:** Claude Code (Pro/Max) or Codex (Plus) usage cap reached
-**Fix:** If role fallback profiles are configured, Harness rotates automatically. If no fallback remains and `auto_resume_on_rate_limit: true` (default), a launchd job is scheduled for shortly after the reset. Otherwise:
+**Fix:** If role fallback profiles are configured, Harness rotates automatically. If no fallback remains and `auto_resume_on_rate_limit: true` (default), an OS-native one-shot resume is scheduled: launchd on macOS, systemd user timers on Linux, or Task Scheduler on Windows. Otherwise:
 ```bash
 # wait until the reset time, then:
 harness resume output/<project_dir>

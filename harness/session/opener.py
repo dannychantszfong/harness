@@ -48,7 +48,8 @@ class SessionOpener:
             blocks.append("")
             blocks.append("## First session — no prior handoff")
             blocks.append(
-                "Read features.json, run init.sh to confirm the app starts, "
+                f"Read features.json, run `{self.config.startup_command_for_platform}` "
+                "to confirm the app starts, "
                 "then pick the highest-priority pending feature."
             )
 
@@ -82,7 +83,9 @@ class SessionOpener:
             f"2. Read `{self.config.spec_file}` — the confirmed product spec, "
             "the source of truth for what to build"
         )
-        blocks.append(f"3. Run `bash {self.config.init_script}` — confirm the app starts")
+        blocks.append(
+            f"3. Run `{self.config.startup_command_for_platform}` — confirm the app starts"
+        )
         blocks.append(f"4. Read `{self.config.features_file}` to understand remaining work")
         blocks.append("5. Run a quick smoke test in the browser (or via curl)")
         blocks.append("6. Pick the highest-priority `pending` feature and begin")

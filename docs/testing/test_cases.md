@@ -185,9 +185,9 @@ See [tests/test_auto_resume.py](../../tests/test_auto_resume.py) — the
 end-to-end test asserts that:
 1. `Orchestrator.run()` does NOT raise when a `RunnerRateLimitedError` is
    raised by an agent
-2. A launchd plist is written to `~/Library/LaunchAgents/`
+2. A platform schedule artifact is written: launchd plist on macOS, systemd user units on Linux, or a Task Scheduler task on Windows
 3. The wrapper script is executable
-4. `auto_resume.cancel(project_id)` removes the plist
+4. `auto_resume.cancel(project_id)` removes/disables the schedule
 
 ---
 
@@ -247,7 +247,7 @@ Before each release, verify:
 - [ ] Missing env var for the chosen mode shows actionable guidance
 - [ ] `"code_runner": "sdk"` in `harness_config.json` skips the interactive prompt
 - [ ] Subscription rate-limit hit surfaces the friendly panel (no traceback)
-- [ ] `auto_resume_on_rate_limit: true` (default) writes a launchd plist
+- [ ] `auto_resume_on_rate_limit: true` (default) writes the platform auto-resume schedule
 - [ ] `harness import <repo>` correctly detects stage and routes to review-only when ≥80% features pass
 - [ ] `harness new --github-repo owner/repo` keeps generated output out of the Harness repo and pushes the output project repo
 - [ ] `harness import <repo> --git-remote URL` copies without source `.git/` and sets the copied project remote

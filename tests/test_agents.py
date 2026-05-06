@@ -134,6 +134,23 @@ def test_generator_raises_rate_limit_signal(runner_config):
     assert exc.value.reset_at == reset_at
 
 
+def test_generator_uses_configured_startup_command(runner_config):
+    runner_config.startup_command = "npm run smoke"
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(output="done", success=True)
+    agent = GeneratorAgent(runner_config, runner=runner)
+    feature = Feature(id="f1", name="Login", description="signup + login", priority=0)
+
+    agent.implement_feature(
+        feature=feature,
+        progress=MagicMock(),
+        session_preamble="context",
+    )
+
+    prompt = runner.implement.call_args.kwargs["prompt"]
+    assert "npm run smoke" in prompt
+
+
 def test_evaluator_run_raises_helpful_message(runner_config):
     agent = EvaluatorAgent(runner_config)
     with pytest.raises(NotImplementedError) as exc:

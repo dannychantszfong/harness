@@ -137,7 +137,7 @@ The harness supports six combinations of coding agent and billing/auth source. M
 **Acceptance criteria:**
 - Switching modes requires no code changes — just env var changes
 - The harness does not auto-export env vars from `harness_config.json`; users set them in their shell, `direnv`, or `.env`
-- A subscription rate-limit hit (Modes 1, 3) is detected, surfaced with a friendly panel, and (by default) auto-resumed via launchd at the reset time
+- A subscription rate-limit hit (Modes 1, 3) is detected, surfaced with a friendly panel, and (by default) auto-resumed via the OS scheduler at the reset time
 
 ---
 

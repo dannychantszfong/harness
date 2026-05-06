@@ -27,7 +27,7 @@ Grading criteria (each scored 1-10):
 
 Process:
 1. Read the sprint contract acceptance criteria.
-2. Run init.sh to start the app.
+2. Run the configured startup command to start the app.
 3. Navigate the UI and test each acceptance criterion.
 4. Score each dimension honestly.
 5. Write specific, actionable feedback — not vague praise.
@@ -159,6 +159,7 @@ class EvaluatorAgent(BaseAgent):
             f"**Feature under review:** {feature.name}\n"
             f"**Description:** {feature.description}"
             f"{contract_block}\n\n"
+            f"**Startup command:** `{self.config.startup_command_for_platform}`\n\n"
             f"**Generator self-evaluation (iteration {iteration}):**\n"
             f"{generator_self_eval}\n\n"
         )
@@ -168,7 +169,7 @@ class EvaluatorAgent(BaseAgent):
             prompt = (
                 f"{_SYSTEM}\n\n"
                 f"{user_content}"
-                "Evaluate the implementation. Run init.sh and test each acceptance "
+                "Evaluate the implementation. Run the startup command and test each acceptance "
                 f"criterion. Then output your scores.\n{_RUNNER_SCORE_INSTRUCTION}"
             )
             output = self._call_via_runner(prompt)
@@ -180,7 +181,7 @@ class EvaluatorAgent(BaseAgent):
                 "role": "user",
                 "content": (
                     user_content
-                    + "Evaluate the implementation. Start by running init.sh and "
+                    + "Evaluate the implementation. Start by running the startup command and "
                     "testing each acceptance criterion. Then call submit_evaluation."
                 ),
             }

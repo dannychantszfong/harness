@@ -68,13 +68,14 @@ class HarnessConfig(BaseModel):
     features_file: str = "features.json"
     progress_file: str = "progress.md"
     init_script: str = "init.sh"
+    startup_command: Optional[str] = None
     spec_file: str = "spec.md"
 
     # Sprint contracts
     sprint_contract_enabled: bool = True
 
-    # When the runner reports a subscription usage cap, schedule a launchd
-    # job to re-run `harness resume` shortly after the reset time. macOS only.
+    # When the runner reports a subscription usage cap, schedule an OS-native
+    # job to re-run `harness resume` shortly after the reset time.
     auto_resume_on_rate_limit: bool = True
 
     # Per-output-project GitHub sync. The Harness repo ignores output/; each
@@ -205,6 +206,17 @@ class HarnessConfig(BaseModel):
     @property
     def init_script_path(self) -> Path:
         return self.output_path / self.init_script
+
+    @property
+    def startup_command_for_platform(self) -> str:
+        if self.startup_command:
+            return self.startup_command
+        suffix = Path(self.init_script).suffix.lower()
+        if suffix == ".ps1":
+            return f"powershell -ExecutionPolicy Bypass -File {self.init_script}"
+        if suffix in {".bat", ".cmd"}:
+            return self.init_script
+        return f"bash {self.init_script}"
 
     @property
     def spec_path(self) -> Path:

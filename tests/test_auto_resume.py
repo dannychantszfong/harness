@@ -1,8 +1,7 @@
-"""Tests for the rate-limit detection + launchd auto-resume scheduling.
+"""Tests for rate-limit detection + cross-platform auto-resume scheduling.
 
-The launchctl tests run only on macOS (skipped elsewhere). They write a
-real plist into ~/Library/LaunchAgents and then immediately cancel it,
-so they leave no scheduled job behind.
+The launchctl end-to-end tests run only on macOS. Linux/systemd and
+Windows/Task Scheduler paths are unit-tested with subprocess mocked.
 """
 
 import os
@@ -91,7 +90,92 @@ def test_label_is_deterministic_per_project():
 
 
 def test_is_supported_matches_platform():
-    assert auto_resume.is_supported() is _DARWIN
+    assert auto_resume.is_supported() is (auto_resume.backend() is not None)
+
+
+def test_backend_detection_for_each_platform(monkeypatch):
+    def fake_which_factory(names):
+        return lambda name: f"/bin/{name}" if name in names else None
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(auto_resume.shutil, "which", fake_which_factory({"launchctl"}))
+    assert auto_resume.backend() == "launchd"
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(auto_resume.shutil, "which", fake_which_factory({"systemctl"}))
+    assert auto_resume.backend() == "systemd"
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(auto_resume.shutil, "which", fake_which_factory({"schtasks", "powershell"}))
+    assert auto_resume.backend() == "task_scheduler"
+
+
+def test_linux_systemd_schedule_writes_units(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    systemd_dir = tmp_path / "systemd"
+    calls = []
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(auto_resume.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(auto_resume, "_systemd_dir", lambda: systemd_dir)
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    scheduled = auto_resume.schedule(
+        project_dir=project_dir,
+        project_id="linux01",
+        fire_at_utc=datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc),
+        harness_binary="/usr/local/bin/harness",
+        buffer_seconds=0,
+    )
+
+    assert scheduled["backend"] == "systemd"
+    assert scheduled["service"].exists()
+    assert scheduled["timer"].exists()
+    assert "OnCalendar=" in scheduled["timer"].read_text()
+    assert ["systemctl", "--user", "enable", "--now", scheduled["timer"].name] in calls
+
+
+def test_windows_task_scheduler_schedule_writes_wrapper(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    calls = []
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        auto_resume.shutil,
+        "which",
+        lambda name: {
+            "schtasks": "C:/Windows/System32/schtasks.exe",
+            "powershell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "harness": "C:/Tools/harness.exe",
+        }.get(name),
+    )
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    scheduled = auto_resume.schedule(
+        project_dir=project_dir,
+        project_id="win01",
+        fire_at_utc=datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc),
+        buffer_seconds=0,
+    )
+
+    assert scheduled["backend"] == "task_scheduler"
+    assert scheduled["wrapper"].suffix == ".ps1"
+    assert "harness.exe" in scheduled["wrapper"].read_text()
+    create_call = next(args for args in calls if args[:2] == ["schtasks", "/Create"])
+    assert "/SC" in create_call
+    assert "ONCE" in create_call
 
 
 # ── End-to-end (Darwin only) ─────────────────────────────────────────────────
