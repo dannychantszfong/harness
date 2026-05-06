@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from typing import Literal, Optional
 import json
 import platform
@@ -146,7 +146,35 @@ class HarnessConfig(BaseModel):
     codex_oss: bool = False
     codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
     code_runner_extra_args: list[str] = Field(default_factory=list)
-    code_runner_env: dict[str, str] = Field(default_factory=dict)
+
+    # Resolved env vars projected onto every coding-agent invocation.
+    #
+    # Two layers feed this single dict:
+    #
+    #   1. The user-authored *base* env stored in this field — defaults
+    #      that apply regardless of which profile the orchestrator picked.
+    #      Set this in config when a value is the same across every
+    #      profile (e.g. PATH adjustments, project-wide flags).
+    #
+    #   2. `RunnerProfile.env` — per-profile env (e.g. ANTHROPIC_BASE_URL
+    #      for an OpenRouter profile). When `runner_profiles.config_for_profile`
+    #      activates a profile, the active profile's env MERGES OVER the
+    #      base: per-key, profile values win on collision, base keys
+    #      survive when the profile doesn't override them.
+    #
+    # Naming history: this field was previously `code_runner_env`. The
+    # `validation_alias` keeps existing configs loading under the old key.
+    # Always read via `self.active_runner_env` at runtime; the aliases are
+    # for serialization compat only.
+    #
+    # Values like "$OPENROUTER_API_KEY" or "${VAR}" are resolved against
+    # the parent process env at call time
+    # (see runners/base._expand_env_value).
+    active_runner_env: dict[str, str] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("active_runner_env", "code_runner_env"),
+        serialization_alias="active_runner_env",
+    )
 
     # Optional role-aware runner rotation. Each order is a whitelist: the
     # orchestrator tries profiles in order and moves to the next profile when

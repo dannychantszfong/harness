@@ -125,15 +125,33 @@ class CodeRunner(ABC):
     def __init__(self, config) -> None:
         self.config = config
 
+    def _resolved_env(self) -> dict[str, str]:
+        """Merged base + profile env, with $VAR / ${VAR} expansion applied.
+
+        See HarnessConfig.active_runner_env for the layering rules.
+        """
+        return getattr(self.config, "active_runner_env", {}) or {}
+
     def subprocess_env(self) -> dict[str, str]:
+        """Build a child-process env: parent env + the resolved overrides."""
         env = os.environ.copy()
-        for key, value in (getattr(self.config, "code_runner_env", {}) or {}).items():
+        for key, value in self._resolved_env().items():
             env[key] = _expand_env_value(value)
         return env
 
     @contextmanager
     def profile_env(self):
-        extra = getattr(self.config, "code_runner_env", {}) or {}
+        """Apply the resolved env to os.environ for the duration of a call.
+
+        IMPORTANT: This mutates the global process env. It is used by the
+        SDK runner because the SDK has no `env=` parameter to pass through.
+        It is therefore unsafe under parallel execution within a single
+        process — that's accepted today because feature execution is
+        sequential. Any future move to parallel features should either
+        (a) replace this with an SDK-specific env hook, or (b) gate the
+        SDK runner to single-process mode.
+        """
+        extra = self._resolved_env()
         old_values: dict[str, str | None] = {}
         try:
             for key, value in extra.items():

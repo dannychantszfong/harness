@@ -375,7 +375,7 @@ Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`
   "codex_oss": false,
   "codex_local_provider": null,
   "code_runner_extra_args": [],
-  "code_runner_env": {},
+  "active_runner_env": {},
   "runner_profiles": [],
   "planner_runner_order": [],
   "generator_runner_order": [],

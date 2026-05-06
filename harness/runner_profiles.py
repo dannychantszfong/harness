@@ -133,11 +133,23 @@ def runner_for_profile(config: HarnessConfig, profile: RunnerProfile) -> CodeRun
 
 
 def config_for_profile(config: HarnessConfig, profile: RunnerProfile) -> HarnessConfig:
+    """Build a per-call HarnessConfig with the active profile projected onto it.
+
+    Env merge rule: the base `active_runner_env` survives, and the profile's
+    `env` MERGES OVER it per-key. Profile keys win on collision; base keys
+    that aren't overridden carry through. This intentionally differs from
+    earlier behavior (full replacement) so that cross-profile defaults
+    set on the project's HarnessConfig stay in effect.
+    """
     data = config.model_dump(mode="python")
     data["code_runner"] = profile.runner
     data["code_runner_model"] = profile.model if profile.model is not None else config.code_runner_model
     data["code_runner_extra_args"] = list(profile.extra_args)
-    data["code_runner_env"] = dict(profile.env)
+
+    merged_env = dict(config.active_runner_env or {})
+    merged_env.update(profile.env or {})
+    data["active_runner_env"] = merged_env
+
     data["codex_oss"] = profile.codex_oss
     data["codex_local_provider"] = profile.codex_local_provider
     return HarnessConfig(**data)

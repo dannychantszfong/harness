@@ -183,7 +183,7 @@ def test_subprocess_passes_configured_model(tmp_config, monkeypatch):
 
 
 def test_subprocess_expands_profile_env(tmp_config, monkeypatch):
-    tmp_config.code_runner_env = {
+    tmp_config.active_runner_env = {
         "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1",
         "ANTHROPIC_AUTH_TOKEN": "$OPENROUTER_API_KEY",
     }
