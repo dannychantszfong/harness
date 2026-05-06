@@ -1,0 +1,49 @@
+<mxfile host="Claude Code" modified="2026-05-03" version="21.0.0">
+  <diagram name="CI/CD Pipeline" id="cicd">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="CI/CD Pipeline — Harness Project" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="100" y="15" width="960" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Stages -->
+        <mxCell id="s-code"    value="📝 Code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="50"  y="120" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="s-lint"    value="🔍 Lint / Type" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="230" y="120" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="s-test"    value="🧪 Unit Tests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="410" y="120" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="s-inttest" value="🔗 Integration&#xa;Tests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="590" y="120" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="s-build"   value="📦 Build" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="770" y="120" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="s-publish" value="🚀 Publish / Ship" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="950" y="120" width="130" height="60" as="geometry"/></mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="a1" edge="1" source="s-code"    target="s-lint"    parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a2" edge="1" source="s-lint"    target="s-test"    parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a3" edge="1" source="s-test"    target="s-inttest" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a4" edge="1" source="s-inttest" target="s-build"   parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a5" edge="1" source="s-build"   target="s-publish" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- Details -->
+        <mxCell id="d-code"    value="git push / PR" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="50"  y="195" width="130" height="25" as="geometry"/></mxCell>
+        <mxCell id="d-lint"    value="ruff, mypy, pyright" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="230" y="195" width="130" height="25" as="geometry"/></mxCell>
+        <mxCell id="d-test"    value="pytest tests/ -v&#xa;(mocked API)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="410" y="195" width="130" height="35" as="geometry"/></mxCell>
+        <mxCell id="d-inttest" value="harness init + plan&#xa;(real API, dry-run)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="590" y="195" width="130" height="35" as="geometry"/></mxCell>
+        <mxCell id="d-build"   value="pip build&#xa;pyproject.toml" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="770" y="195" width="130" height="35" as="geometry"/></mxCell>
+        <mxCell id="d-publish" value="pip install / PyPI&#xa;or Docker image" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="950" y="195" width="130" height="35" as="geometry"/></mxCell>
+
+        <!-- Failure path -->
+        <mxCell id="fail-note" value="Any stage failure → PR blocked. Fix root cause; never skip with --no-verify." style="text;html=1;strokeColor=#b85450;fillColor=#f8cecc;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="200" y="280" width="700" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Harness-specific gate -->
+        <mxCell id="harness-gate" value="Harness-Specific Gate: evaluator_pass_score ≥ 8.0 required before feature is committed to main branch" style="text;html=1;strokeColor=#d6b656;fillColor=#fff2cc;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="200" y="330" width="700" height="35" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

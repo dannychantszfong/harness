@@ -1,0 +1,23 @@
+project_name: "my-web-app"
+brief: >
+  A task management web app where users can create projects, add tasks with
+  due dates and priorities, mark tasks complete, and view a Kanban board.
+  Users can register and log in. The app should feel polished and modern.
+
+output_dir: "./output/web_app"
+
+planner_model: "claude-opus-4-7"
+generator_model: "claude-opus-4-7"
+evaluator_model: "claude-opus-4-7"
+
+max_iterations_per_feature: 10
+evaluator_pass_score: 8.0
+
+evaluator_weights:
+  design_quality: 0.30
+  originality: 0.30
+  craft: 0.25
+  functionality: 0.15
+
+sprint_contract_enabled: true
+context_reset_threshold_tokens: 150000

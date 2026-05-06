@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-agent-harness"
+version = "0.1.0"
+description = "A production harness for long-running Claude agents with context resets, GAN-style evaluation, and multi-session progress tracking"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    "rich>=13.0",
+    "gitpython>=3.1",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+# Agentic runners — install the relevant CLI separately (not via pip)
+sdk = [
+    "claude-code-sdk>=0.0.1",   # pip install claude-code-sdk
+]
+
+# API runners — install the provider SDK you want
+openai = [
+    "openai>=1.30",             # also used for OpenRouter
+]
+gemini = [
+    "google-generativeai>=0.8",
+]
+
+# Install everything for all providers
+all-providers = [
+    "claude-code-sdk>=0.0.1",
+    "openai>=1.30",
+    "google-generativeai>=0.8",
+]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+harness = "cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["harness"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

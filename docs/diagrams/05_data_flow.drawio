@@ -1,0 +1,92 @@
+<mxfile host="Claude Code" modified="2026-05-03" version="21.0.0">
+  <diagram name="Data Flow Diagram" id="dfd">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Data Flow Diagram — Claude Agent Harness" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="960" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- External entities -->
+        <mxCell id="user"    value="User" style="shape=mxgraph.flowchart.start_2;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="60"  y="160" width="80" height="80" as="geometry"/></mxCell>
+        <mxCell id="claude"  value="Anthropic&#xa;API" style="shape=mxgraph.flowchart.start_2;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1000" y="160" width="80" height="80" as="geometry"/></mxCell>
+        <mxCell id="browser" value="Browser&#xa;(Playwright)" style="shape=mxgraph.flowchart.start_2;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1000" y="560" width="80" height="80" as="geometry"/></mxCell>
+
+        <!-- Processes -->
+        <mxCell id="p1" value="P1&#xa;Initialize" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="240" y="120" width="120" height="60" as="geometry"/></mxCell>
+        <mxCell id="p2" value="P2&#xa;Plan" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="440" y="120" width="120" height="60" as="geometry"/></mxCell>
+        <mxCell id="p3" value="P3&#xa;Generate" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="640" y="120" width="120" height="60" as="geometry"/></mxCell>
+        <mxCell id="p4" value="P4&#xa;Evaluate" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="840" y="120" width="120" height="60" as="geometry"/></mxCell>
+        <mxCell id="p5" value="P5&#xa;Orchestrate" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1"><mxGeometry x="490" y="300" width="140" height="70" as="geometry"/></mxCell>
+        <mxCell id="p6" value="P6&#xa;Context Reset" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="640" y="420" width="120" height="60" as="geometry"/></mxCell>
+        <mxCell id="p7" value="P7&#xa;Progress Track" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="300" y="420" width="120" height="60" as="geometry"/></mxCell>
+
+        <!-- Data stores -->
+        <mxCell id="ds1" value="D1 — features.json" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="200" y="560" width="200" height="50" as="geometry"/></mxCell>
+        <mxCell id="ds2" value="D2 — progress.md" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="440" y="560" width="200" height="50" as="geometry"/></mxCell>
+        <mxCell id="ds3" value="D3 — handoff_session_N.json" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="680" y="560" width="240" height="50" as="geometry"/></mxCell>
+        <mxCell id="ds4" value="D4 — Git Repository" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="200" y="640" width="200" height="50" as="geometry"/></mxCell>
+        <mxCell id="ds5" value="D5 — init.sh" style="shape=table;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="440" y="640" width="200" height="50" as="geometry"/></mxCell>
+
+        <!-- Flows: User → P1 -->
+        <mxCell id="f1" value="project brief&#xa;+ config.yaml" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="user" target="p1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P1 → Claude API -->
+        <mxCell id="f2" value="feature decomposition&#xa;prompt" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p1" target="claude" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="150"/><mxPoint x="1040" y="150"/></Array></mxGeometry></mxCell>
+
+        <!-- P1 → D1, D4, D5 -->
+        <mxCell id="f3" value="feature list" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p1" target="ds1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f4" value="initial commit" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p1" target="ds4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f5" value="startup script" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p1" target="ds5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P2 → Claude API -->
+        <mxCell id="f6" value="brief + spec prompt" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p2" target="claude" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="500" y="150"/><mxPoint x="1040" y="150"/></Array></mxGeometry></mxCell>
+
+        <!-- Claude → P2 -->
+        <mxCell id="f7" value="product spec" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="claude" target="p2" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1040" y="130"/><mxPoint x="500" y="130"/></Array></mxGeometry></mxCell>
+
+        <!-- P5 orchestrates P3, P4 -->
+        <mxCell id="f8" value="feature + session ctx" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p5" target="p3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f9" value="self-eval" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p5" target="p4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P3 → Claude API -->
+        <mxCell id="f10" value="implement prompt (cached)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p3" target="claude" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <!-- Claude → P3 -->
+        <mxCell id="f11" value="code + self-eval" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="claude" target="p3" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1040" y="140"/><mxPoint x="700" y="140"/></Array></mxGeometry></mxCell>
+
+        <!-- P4 → Claude API + browser -->
+        <mxCell id="f12" value="grade prompt + tool" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p4" target="claude" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f13" value="Playwright navigate" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="p4" target="browser" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="900" y="180"/><mxPoint x="900" y="600"/><mxPoint x="1000" y="600"/></Array></mxGeometry></mxCell>
+
+        <!-- P4 → P5: eval result -->
+        <mxCell id="f14" value="EvaluationResult" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="p4" target="p5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P3 → D4 -->
+        <mxCell id="f15" value="git commit" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p3" target="ds4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P5 → P7 -->
+        <mxCell id="f16" value="update status/scores" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p5" target="p7" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P7 → D1, D2 -->
+        <mxCell id="f17" value="write" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p7" target="ds1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f18" value="write" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p7" target="ds2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- D1 → P5 (read at session start) -->
+        <mxCell id="f19" value="read features" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="ds1" target="p5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P5 → P6 (context reset) -->
+        <mxCell id="f20" value="token budget" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="p5" target="p6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- P6 → D3 -->
+        <mxCell id="f21" value="write handoff" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="p6" target="ds3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- D3 → P5 (session resume) -->
+        <mxCell id="f22" value="read at session start" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" source="ds3" target="p5" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="800" y="585"/><mxPoint x="800" y="460"/><mxPoint x="630" y="370"/></Array></mxGeometry></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,16 @@
+1. Claude code alike thinking process animation to show progress
+2. Allow user introduce repo from other repo and goes though the entire process
+3. Check if we have --dangeriously-skip-everything or we still get the ask for review and agent takes control and actually review those and gives premission
+4. Cron job, for usage limit, when hits, take it as a notification, and re-run after those usage limit been hit.
+5. For update on github, make sure that each project is each github independent repo, so for this repo, harness, it wont containes the output repo by nature. And during each workflow of the output, it will push each project as its own repo to esacpe to confusing
+
+
+
+
+
+
+i thnk the main idea of this project is mainly for agent to agent workflow hence we already know and industral agree that claude code is the best coding agent, but how to streamline and make the agent work more flawlessly by minimising human interven probably is the goal of this project.
+And the main thing for having api is just simple for claude code and codex(mainly claude code tbf) as the backbone for the godly agent Architecture.
+
+
+And esstiencially, i am levaging the good Infrastructure of claude 

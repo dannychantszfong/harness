@@ -1,0 +1,32 @@
+System & Architecture Diagrams
+Architecture Diagram (High-Level) – Big-picture components and how they connect
+Microservices Diagram – Shows services and communication (APIs, queues)
+Deployment Diagram – Where things run (servers, cloud, containers)
+Infrastructure Diagram – Networking, databases, load balancers
+
+Process & Behavior Diagrams
+Flowchart (you already know) – Basic logic flow
+Sequence Diagram – Who talks to whom, in what order
+Activity Diagram (UML) – Workflow with decisions and parallel steps
+State Machine Diagram – How something changes over time (e.g., order status)
+
+Data & Structure Diagrams
+ERD (Entity-Relationship Diagram) – Tables and relationships
+Class Diagram (UML) – Objects, attributes, methods
+Schema Diagram – Database structure
+Data Flow Diagram (DFD) – How data moves through the system
+
+Product & Planning Diagrams
+User Journey Map – How a user experiences your product end-to-end
+Wireframes / UI Flow – Screens and navigation paths
+Story Mapping – Organizing features by user value
+Roadmap Diagram – Timeline of delivery
+
+DevOps & Runtime Views
+CI/CD Pipeline Diagram – Build, test, deploy flow
+Monitoring/Observability Diagram – Logs, metrics, alerts
+Event Flow Diagram – Event-driven systems (Kafka, etc.)
+
+
+
+

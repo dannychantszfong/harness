@@ -1,0 +1,36 @@
+Product & Requirements Docs
+PRD (Product Requirements Document) – Features, goals, user needs
+User Stories – Small, actionable requirements (“As a user…”)
+Use Cases – Step-by-step user interactions
+Acceptance Criteria – What “done” means
+
+Technical Documentation
+Architecture Doc – System design, components, decisions
+Technical Design Doc (TDD) – Deep dive into a feature before building
+API Documentation – Endpoints, request/response, auth
+Code Documentation – Comments, README, module explanations
+
+Process & Operational Docs
+
+Runbooks – “What to do when things break”
+SOPs (Standard Operating Procedures) – Repeatable processes
+Deployment Guides – How to release safely
+Incident Reports / Postmortems – What failed and why
+
+Testing & Quality Docs
+Test Plans – What gets tested and how
+Test Cases – Specific scenarios
+QA Reports – Results and bugs
+Bug Reports – Clear issue descriptions
+
+Knowledge & Internal Docs
+Wiki / Knowledge Base – Centralized info (often in Confluence or Notion)
+Onboarding Docs – Help new hires ramp up
+Glossary – Shared terminology
+Decision Logs (ADR – Architecture Decision Records) – Why choices were made
+
+External Documentation (User-Facing)
+User Guides / Manuals – How to use the product
+API Docs (Public) – For developers using your system
+Tutorials / Getting Started
+Release Notes / Changelogs

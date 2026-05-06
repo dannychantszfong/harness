@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local tooling
+.DS_Store
+.claude/settings.local.json
+.env
+.env.*
+
+# Generated harness output and runtime logs
+output/
+run_logs/
+
+# Local notes / machine-specific exports
+extensions.txt

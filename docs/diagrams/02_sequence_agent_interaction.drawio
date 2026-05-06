@@ -1,0 +1,85 @@
+<mxfile host="Claude Code" modified="2026-05-03" version="21.0.0">
+  <diagram name="Sequence Diagram" id="sequence">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Claude Agent Harness — Sequence Diagram (Agent Interaction)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="1400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Lifeline headers -->
+        <mxCell id="lh-user"        value="User / CLI"         style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="60"   y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-orch"        value="Orchestrator"       style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="250"  y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-init"        value="Initializer"        style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="440"  y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-planner"     value="Planner"            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="630"  y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-generator"   value="Generator"          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="820"  y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-evaluator"   value="Evaluator"          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1010" y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-api"         value="Anthropic API"      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1200" y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-disk"        value="Disk (files/git)"   style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1390" y="80" width="130" height="50" as="geometry"/></mxCell>
+
+        <!-- Lifelines (dashed vertical lines) -->
+        <mxCell id="ll-user"      style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry x="125"  y="130" relative="1" as="geometry"><Array as="points"/><mxPoint x="125"  y="130" as="sourcePoint"/><mxPoint x="125"  y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-orch"      style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315"  y="130" as="sourcePoint"/><mxPoint x="315"  y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-init"      style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505"  y="130" as="sourcePoint"/><mxPoint x="505"  y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-planner"   style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="695"  y="130" as="sourcePoint"/><mxPoint x="695"  y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-generator" style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="885"  y="130" as="sourcePoint"/><mxPoint x="885"  y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-evaluator" style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1075" y="130" as="sourcePoint"/><mxPoint x="1075" y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-api"       style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="130" as="sourcePoint"/><mxPoint x="1265" y="1120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll-disk"      style="edgeStyle=none;dashed=1;endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1455" y="130" as="sourcePoint"/><mxPoint x="1455" y="1120" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- ── PHASE 1: INITIALIZE ── -->
+        <mxCell id="ph1-label" value="Phase 1: Initialize (once)" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=left;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="60" y="150" width="220" height="25" as="geometry"/></mxCell>
+
+        <mxCell id="s1" value="harness run config.yaml" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="125" y="185" as="sourcePoint"/><mxPoint x="315" y="185" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s2" value="run(brief)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="205" as="sourcePoint"/><mxPoint x="505" y="205" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s3" value="set_feature_list tool call" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="225" as="sourcePoint"/><mxPoint x="1265" y="225" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s4" value="features + init.sh content" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="245" as="sourcePoint"/><mxPoint x="505" y="245" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s5" value="save features.json + init.sh + git commit" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="265" as="sourcePoint"/><mxPoint x="1455" y="265" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s6" value="ProjectProgress" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="285" as="sourcePoint"/><mxPoint x="315" y="285" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- ── PHASE 2: PLAN ── -->
+        <mxCell id="ph2-label" value="Phase 2: Plan" style="text;html=1;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="60" y="305" width="220" height="25" as="geometry"/></mxCell>
+
+        <mxCell id="s7" value="run(brief)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="340" as="sourcePoint"/><mxPoint x="695" y="340" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s8" value="stream spec (prompt cached)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="695" y="360" as="sourcePoint"/><mxPoint x="1265" y="360" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s9" value="product spec text" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="380" as="sourcePoint"/><mxPoint x="695" y="380" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s10" value="spec string" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="695" y="400" as="sourcePoint"/><mxPoint x="315" y="400" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s10b" value="save spec to features.json" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="420" as="sourcePoint"/><mxPoint x="1455" y="420" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- ── PHASE 3: FEATURE LOOP ── -->
+        <mxCell id="ph3-label" value="Phase 3: Feature Loop (GAN — repeated per feature)" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=left;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="60" y="445" width="380" height="25" as="geometry"/></mxCell>
+
+        <mxCell id="s11" value="negotiate_sprint_contract(feature)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="480" as="sourcePoint"/><mxPoint x="885" y="480" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s12" value="propose_sprint_contract tool call" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="885" y="500" as="sourcePoint"/><mxPoint x="1265" y="500" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s13" value="criteria + out_of_scope" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="520" as="sourcePoint"/><mxPoint x="885" y="520" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s14" value="SprintContract" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="885" y="540" as="sourcePoint"/><mxPoint x="315" y="540" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s14b" value="attach_sprint_contract → features.json" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="560" as="sourcePoint"/><mxPoint x="1455" y="560" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- GAN iteration box -->
+        <mxCell id="gan-box" value="loop [iteration 1..N  until score ≥ threshold]" style="swimlane;startSize=25;fillColor=none;strokeColor=#82b366;dashed=1;fontStyle=2;fontSize=10;" vertex="1" parent="1"><mxGeometry x="60" y="580" width="1540" height="310" as="geometry"/></mxCell>
+
+        <mxCell id="s15" value="implement_feature(feature, feedback, iteration)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="255" y="45" as="sourcePoint"/><mxPoint x="825" y="45" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s16" value="stream implementation (prompt cached system)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="825" y="70" as="sourcePoint"/><mxPoint x="1205" y="70" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s17" value="code + self-eval text" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="1205" y="95" as="sourcePoint"/><mxPoint x="825" y="95" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s17b" value="git commit (feat: &lt;feature&gt;)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="825" y="120" as="sourcePoint"/><mxPoint x="1395" y="120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s18" value="self_eval string" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="825" y="145" as="sourcePoint"/><mxPoint x="255" y="145" as="targetPoint"/></mxGeometry></mxCell>
+
+        <mxCell id="s19" value="evaluate(feature, self_eval, iteration)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="255" y="175" as="sourcePoint"/><mxPoint x="1015" y="175" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s20" value="submit_evaluation tool call (design/orig/craft/fn)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="1015" y="200" as="sourcePoint"/><mxPoint x="1205" y="200" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s21" value="structured scores + feedback" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="1205" y="225" as="sourcePoint"/><mxPoint x="1015" y="225" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s22" value="EvaluationResult" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="1015" y="250" as="sourcePoint"/><mxPoint x="255" y="250" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s23" value="record_evaluation → features.json + progress.md" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="gan-box"><mxGeometry relative="1" as="geometry"><mxPoint x="255" y="280" as="sourcePoint"/><mxPoint x="1395" y="280" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- Context reset -->
+        <mxCell id="ctx-note" value="[alt] token budget exceeded → build HandoffDocument → reset token counter → inject preamble into next session" style="text;html=1;strokeColor=#b85450;fillColor=#f8cecc;align=left;fontSize=10;" vertex="1" parent="1"><mxGeometry x="60" y="910" width="700" height="30" as="geometry"/></mxCell>
+
+        <!-- Done -->
+        <mxCell id="s-done" value="progress update + status printed" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="960" as="sourcePoint"/><mxPoint x="125" y="960" as="targetPoint"/></mxGeometry></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,92 @@
+<mxfile host="Claude Code" modified="2026-05-03" version="21.0.0">
+  <diagram name="State Machine" id="state-machine">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Feature Lifecycle — State Machine" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="960" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Start -->
+        <mxCell id="start" value="" style="ellipse;aspect=fixed;fillColor=#000000;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="560" y="90" width="30" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- PENDING -->
+        <mxCell id="pending" value="PENDING" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="160" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- IN_PROGRESS -->
+        <mxCell id="inprog" value="IN_PROGRESS" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="330" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- PASSING -->
+        <mxCell id="passing" value="PASSING" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="500" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- FAILING -->
+        <mxCell id="failing" value="FAILING" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="500" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- End (terminal) -->
+        <mxCell id="end" value="" style="ellipse;aspect=fixed;fillColor=#000000;strokeColor=#000000;double=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="660" width="30" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Transitions -->
+        <mxCell id="t-start-pending" value="feature created by Initializer" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="start" target="pending" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t-pending-inprog" value="Orchestrator selects next feature&#xa;tracker.mark_in_progress()" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="pending" target="inprog" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t-inprog-passing" value="score ≥ threshold&#xa;tracker.record_evaluation(passed=True)&#xa;git commit" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;fontColor=#006600;" edge="1" source="inprog" target="passing" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="420" y="370"/><mxPoint x="350" y="540"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t-inprog-failing" value="score &lt; threshold&#xa;AND iterations exhausted&#xa;tracker.record_evaluation(passed=False)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;fontColor=#b85450;" edge="1" source="inprog" target="failing" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="720" y="370"/><mxPoint x="790" y="540"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t-inprog-self" value="score &lt; threshold&#xa;AND iterations remain&#xa;→ feed evaluator feedback back" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" source="inprog" target="inprog" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="760" y="370"/><mxPoint x="760" y="370"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t-failing-inprog" value="manual retry OR&#xa;next session picks up" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#d6b656;" edge="1" source="failing" target="inprog" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="880" y="540"/><mxPoint x="880" y="370"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t-passing-end" value="feature done" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" edge="1" source="passing" target="end" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Notes -->
+        <mxCell id="note1" value="Note: Context reset can happen during IN_PROGRESS.&#xa;HandoffDocument preserves state for next session." style="text;html=1;strokeColor=#d6b656;fillColor=#fff2cc;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="680" width="380" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note2" value="EvaluationResult recorded per iteration.&#xa;Full history preserved in features.json." style="text;html=1;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="680" width="380" height="45" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

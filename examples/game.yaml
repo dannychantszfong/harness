@@ -1,0 +1,24 @@
+project_name: "browser-game"
+brief: >
+  A browser-based 2D puzzle game where the player navigates a character
+  through procedurally generated mazes, collects keys to unlock doors,
+  and advances through levels of increasing difficulty. Includes a high
+  score leaderboard stored in a backend database.
+
+output_dir: "./output/game"
+
+planner_model: "claude-opus-4-7"
+generator_model: "claude-opus-4-7"
+evaluator_model: "claude-opus-4-7"
+
+max_iterations_per_feature: 15
+evaluator_pass_score: 7.5
+
+evaluator_weights:
+  design_quality: 0.25
+  originality: 0.25
+  craft: 0.20
+  functionality: 0.30   # games are more functionality-weighted
+
+sprint_contract_enabled: true
+context_reset_threshold_tokens: 150000
