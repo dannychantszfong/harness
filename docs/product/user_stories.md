@@ -11,7 +11,7 @@
 
 **US-01** — As a developer, I want to describe my project in 1–4 sentences and have the harness automatically decompose it into an ordered feature list.
 
-**US-02** — As a developer, I want an `init.sh` script generated for my project so any session can verify the app starts in one command.
+**US-02** — As a developer, I want a platform-appropriate startup script generated for my project (`init.sh`, `init.ps1`, or `init.bat`) so any session can verify the app starts in one command.
 
 **US-03** — As a developer, I want an initial git commit created automatically so I have a clean baseline to compare against.
 

@@ -28,8 +28,8 @@
         <!-- Details -->
         <mxCell id="d-code"    value="git push / PR" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="50"  y="195" width="130" height="25" as="geometry"/></mxCell>
         <mxCell id="d-lint"    value="ruff, mypy, pyright" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="230" y="195" width="130" height="25" as="geometry"/></mxCell>
-        <mxCell id="d-test"    value="pytest tests/ -v&#xa;(mocked API)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="410" y="195" width="130" height="35" as="geometry"/></mxCell>
-        <mxCell id="d-inttest" value="harness init + plan&#xa;(real API, dry-run)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="590" y="195" width="130" height="35" as="geometry"/></mxCell>
+        <mxCell id="d-test"    value="pytest tests/ -v&#xa;(mocked runners)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="410" y="195" width="130" height="35" as="geometry"/></mxCell>
+        <mxCell id="d-inttest" value="harness init + plan&#xa;(runner/API dry-run)" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="590" y="195" width="130" height="35" as="geometry"/></mxCell>
         <mxCell id="d-build"   value="pip build&#xa;pyproject.toml" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="770" y="195" width="130" height="35" as="geometry"/></mxCell>
         <mxCell id="d-publish" value="pip install / PyPI&#xa;or Docker image" style="text;html=1;align=center;fontSize=10;" vertex="1" parent="1"><mxGeometry x="950" y="195" width="130" height="35" as="geometry"/></mxCell>
 

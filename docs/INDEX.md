@@ -11,7 +11,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 
 | File | Type | What it shows |
 |------|------|---------------|
-| [01_architecture_overview.drawio](diagrams/01_architecture_overview.drawio) | Architecture | 6-layer system: CLI → Orchestration → Agents → **Runners** → Persistence → External |
+| [01_architecture_overview.drawio](diagrams/01_architecture_overview.drawio) | Architecture | CLI/setup → orchestration → agents → coding-agent runners → platform/persistence/external services |
 | [02_sequence_agent_interaction.drawio](diagrams/02_sequence_agent_interaction.drawio) | Sequence | Agent interaction across all three phases |
 | [03_state_machine_feature.drawio](diagrams/03_state_machine_feature.drawio) | State Machine | Feature lifecycle: PENDING → IN_PROGRESS → PASSING / FAILING |
 | [04_flowchart_gan_loop.drawio](diagrams/04_flowchart_gan_loop.drawio) | Flowchart | GAN generator ↔ evaluator loop with context reset branch |
@@ -53,7 +53,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 | File | Description |
 |------|-------------|
 | [test_plan.md](testing/test_plan.md) | Strategy, test cases by component (incl. the 3 coding-agent runners) |
-| [test_cases.md](testing/test_cases.md) | Step-by-step specs for runner factory, subprocess, SDK, API, generator integration |
+| [test_cases.md](testing/test_cases.md) | Step-by-step specs for runner factory, subprocess, SDK, Codex, rate limits, generator integration |
 
 ---
 
@@ -96,7 +96,7 @@ Use `harness animation-theme "frostbound library" --runner codex` to have a sign
 
 ```
 Session Open
-  └─ read handoff → git log → features.json → run init.sh → select feature
+  └─ read handoff → git log → features.json → run configured startup command → select feature
         │
         ▼
 Sprint Contract
@@ -108,7 +108,8 @@ Sprint Contract
   │  Generator: build prompt → delegate to CodeRunner.implement()           │
   │    └─ One of three coding-agent runners                                  │
   │       (subprocess = Claude Code CLI, sdk = Claude Code SDK,              │
-  │        codex = Codex CLI). All write files, run bash, commit git.        │
+  │        codex = Codex CLI).                                               │
+  │       All write files, run shell commands, and commit git.                │
   │       API providers (Anthropic / OpenAI / Gemini / OpenRouter)           │
   │       plug into the agent above via env vars, not as separate runners.   │
   │                  ↓ self-eval text                                        │

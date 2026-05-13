@@ -17,7 +17,7 @@
         <mxCell id="cli" value="CLI (cli.py)&#xa;run | status | init | plan | runners" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="user-layer">
           <mxGeometry x="150" y="30" width="210" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="runner-flag" value="--runner subprocess&#xa;--runner openrouter ..." style="shape=callout;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="user-layer">
+        <mxCell id="runner-flag" value="--runner subprocess&#xa;--runner sdk | codex&#xa;harness setup profiles" style="shape=callout;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="user-layer">
           <mxGeometry x="420" y="25" width="200" height="55" as="geometry" />
         </mxCell>
         <mxCell id="json" value="harness_config.json&#xa;code_runner: subprocess" style="shape=document;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="user-layer">
@@ -42,16 +42,16 @@
         <mxCell id="agent-layer" value="Agent Layer" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="40" y="350" width="1580" height="160" as="geometry" />
         </mxCell>
-        <mxCell id="initializer" value="InitializerAgent&#xa;&#xa;• Brief → features.json&#xa;• Write init.sh&#xa;• Initial git commit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
+        <mxCell id="initializer" value="InitializerAgent&#xa;&#xa;• Brief → features.json&#xa;• Write platform startup script&#xa;• Initial git commit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
           <mxGeometry x="50" y="30" width="200" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="planner" value="PlannerAgent&#xa;&#xa;• Brief → full spec&#xa;• Scope + success criteria&#xa;• Always uses Anthropic API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
+        <mxCell id="planner" value="PlannerAgent&#xa;&#xa;• Brief → full spec&#xa;• Scope + success criteria&#xa;• Runner or API mode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
           <mxGeometry x="300" y="30" width="210" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="generator" value="GeneratorAgent&#xa;&#xa;• Negotiate sprint contract (API)&#xa;• Implement feature via Runner&#xa;• Self-eval + accumulate tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;fontStyle=1;" vertex="1" parent="agent-layer">
+        <mxCell id="generator" value="GeneratorAgent&#xa;&#xa;• Negotiate sprint contract&#xa;• Implement feature via Runner&#xa;• Self-eval + accumulate tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;fontStyle=1;" vertex="1" parent="agent-layer">
           <mxGeometry x="565" y="30" width="230" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="evaluator" value="EvaluatorAgent&#xa;&#xa;• Grade: design/orig/craft/fn&#xa;• Structured scores (tool use)&#xa;• Always uses Anthropic API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
+        <mxCell id="evaluator" value="EvaluatorAgent&#xa;&#xa;• Grade: design/orig/craft/fn&#xa;• Structured scores or XML&#xa;• Runner or API mode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="agent-layer">
           <mxGeometry x="855" y="30" width="230" height="110" as="geometry" />
         </mxCell>
         <mxCell id="base" value="BaseAgent&#xa;(base.py)&#xa;&#xa;• Streaming · cache&#xa;• Token tracking&#xa;• Tool use" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;" vertex="1" parent="agent-layer">
@@ -64,33 +64,33 @@
         </mxCell>
 
         <!-- Agentic sub-header -->
-        <mxCell id="agentic-label" value="AGENTIC  —  uses subscription, full file I/O" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;fontStyle=1;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="agentic-label" value="CODING AGENTS  —  subscription/API auth, full file I/O" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;fontStyle=1;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="50" y="35" width="580" height="25" as="geometry" />
         </mxCell>
-        <mxCell id="r-subprocess" value="subprocess&#xa;claude --print&#xa;--dangerously-skip-permissions&#xa;Claude subscription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-subprocess" value="subprocess&#xa;Claude Code CLI&#xa;subscription or env auth&#xa;profile-rotatable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="50" y="68" width="165" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="r-sdk" value="sdk&#xa;claude_code_sdk.query()&#xa;structured stream&#xa;Claude subscription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-sdk" value="sdk&#xa;Claude Code SDK&#xa;structured stream&#xa;subscription or env auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="230" y="68" width="165" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="r-codex" value="codex&#xa;codex --approval-mode&#xa;full-auto&#xa;OpenAI subscription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-codex" value="codex&#xa;Codex CLI&#xa;subscription or env auth&#xa;OpenAI/custom model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="410" y="68" width="165" height="90" as="geometry" />
         </mxCell>
 
         <!-- API sub-header -->
-        <mxCell id="api-label" value="API  —  pay-per-token, text output only" style="text;html=1;strokeColor=#b85450;fillColor=#f8cecc;align=center;fontStyle=1;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="api-label" value="MODEL / AUTH ROUTES  —  plug into coding-agent runners" style="text;html=1;strokeColor=#b85450;fillColor=#f8cecc;align=center;fontStyle=1;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="630" y="35" width="900" height="25" as="geometry" />
         </mxCell>
-        <mxCell id="r-anthropic" value="anthropic&#xa;Anthropic API&#xa;ANTHROPIC_API_KEY&#xa;claude-opus-4-7" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-anthropic" value="Claude API route&#xa;ANTHROPIC_API_KEY&#xa;feeds Claude Code&#xa;not a runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="630" y="68" width="165" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="r-openai" value="openai&#xa;OpenAI API&#xa;OPENAI_API_KEY&#xa;gpt-4o" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-openai" value="OpenAI API route&#xa;OPENAI_API_KEY&#xa;feeds Codex&#xa;not a runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="810" y="68" width="165" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="r-gemini" value="gemini&#xa;Google Gemini API&#xa;GEMINI_API_KEY&#xa;gemini-2.5-pro" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-gemini" value="Gemini route&#xa;GEMINI_API_KEY&#xa;custom provider path&#xa;not a runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="990" y="68" width="165" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="r-openrouter" value="openrouter&#xa;OpenRouter API&#xa;OPENROUTER_API_KEY&#xa;any model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
+        <mxCell id="r-openrouter" value="OpenRouter route&#xa;ANTHROPIC_BASE_URL&#xa;+ AUTH_TOKEN&#xa;feeds Claude Code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="runner-layer">
           <mxGeometry x="1170" y="68" width="165" height="90" as="geometry" />
         </mxCell>
 
@@ -107,13 +107,13 @@
         <mxCell id="handoff-json" value="handoff_session_N.json&#xa;Cross-session handoffs&#xa;what / state / next" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="persist-layer">
           <mxGeometry x="580" y="20" width="200" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="init-sh" value="init.sh&#xa;App startup&#xa;Health check" style="shape=document;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="persist-layer">
+        <mxCell id="init-sh" value="init.sh / init.ps1 / init.bat&#xa;Platform startup&#xa;Health check" style="shape=document;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="persist-layer">
           <mxGeometry x="850" y="20" width="170" height="85" as="geometry" />
         </mxCell>
         <mxCell id="git-repo" value="Git Repository&#xa;1 commit / passing feature&#xa;Recovery points" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="persist-layer">
           <mxGeometry x="1090" y="20" width="190" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="app-code" value="src/ (generated app)&#xa;Written by agentic runners&#xa;Not present for API runners" style="shape=document;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="persist-layer">
+        <mxCell id="app-code" value="src/ (generated app)&#xa;Written by coding agents&#xa;Cross-platform project repo" style="shape=document;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="persist-layer">
           <mxGeometry x="1350" y="20" width="200" height="85" as="geometry" />
         </mxCell>
 
@@ -121,16 +121,16 @@
         <mxCell id="ext-layer" value="External Services" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="40" y="910" width="1580" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="anthropic-api" value="Anthropic API&#xa;claude-opus-4-7&#xa;Planner · Evaluator · anthropic runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
+        <mxCell id="anthropic-api" value="Anthropic API&#xa;Claude Code env auth&#xa;optional api mode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
           <mxGeometry x="100" y="20" width="260" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="openai-api" value="OpenAI API&#xa;gpt-4o · o3&#xa;openai runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
+        <mxCell id="openai-api" value="OpenAI API&#xa;Codex env auth&#xa;model route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
           <mxGeometry x="420" y="20" width="200" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="gemini-api-ext" value="Google Gemini API&#xa;gemini-2.5-pro&#xa;gemini runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
+        <mxCell id="gemini-api-ext" value="Google Gemini API&#xa;custom provider&#xa;model route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
           <mxGeometry x="680" y="20" width="200" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="openrouter-api" value="OpenRouter&#xa;any model&#xa;openrouter runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
+        <mxCell id="openrouter-api" value="OpenRouter&#xa;any model&#xa;Claude Code route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">
           <mxGeometry x="940" y="20" width="200" height="60" as="geometry" />
         </mxCell>
         <mxCell id="playwright-ext" value="Playwright MCP&#xa;Browser automation&#xa;Evaluator verification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="ext-layer">

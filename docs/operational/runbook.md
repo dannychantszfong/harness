@@ -59,7 +59,7 @@ harness init output/my_project_a3f8c21b/harness_config.json "Your brief here"
 
 # Step 3 — Verify init
 ls output/my_project/
-# Expected: features.json  init.sh  progress.md  .git/
+# Expected: features.json  init.sh/init.ps1/init.bat  progress.md  .git/
 
 # Step 4 — Check features
 harness status output/my_project_a3f8c21b/harness_config.json

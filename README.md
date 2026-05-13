@@ -52,7 +52,7 @@ harness new
         │
         ▼
 Phase 1 — Initializer
-  └─ Decomposes brief into feature list, writes init.sh, git init
+  └─ Decomposes brief into feature list, writes platform startup script, git init
 
 Phase 2 — Planner
   └─ Expands brief into full product spec (skipped if already confirmed)
@@ -323,7 +323,7 @@ agent-harness/
 ├── harness/
 │   ├── agents/
 │   │   ├── base.py              # Streaming, prompt caching, _call_via_runner helper
-│   │   ├── initializer.py       # One-time setup: features.json, init.sh, git commit
+│   │   ├── initializer.py       # One-time setup: features.json, startup script, git commit
 │   │   ├── planner.py           # Brief → spec; align_requirements() back-and-forth loop
 │   │   ├── generator.py         # Feature implementation (delegates to runner)
 │   │   └── evaluator.py         # Adversarial grader — tool use (api) or XML parsing (runner)
@@ -376,6 +376,9 @@ Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`
   "codex_local_provider": null,
   "code_runner_extra_args": [],
   "active_runner_env": {},
+  "init_script": null,
+  "init_script_type": null,
+  "startup_command": null,
   "runner_profiles": [],
   "planner_runner_order": [],
   "generator_runner_order": [],

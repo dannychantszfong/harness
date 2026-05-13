@@ -17,7 +17,7 @@
         <mxCell id="lh-planner"     value="Planner"            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="630"  y="80" width="130" height="50" as="geometry"/></mxCell>
         <mxCell id="lh-generator"   value="Generator"          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="820"  y="80" width="130" height="50" as="geometry"/></mxCell>
         <mxCell id="lh-evaluator"   value="Evaluator"          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1010" y="80" width="130" height="50" as="geometry"/></mxCell>
-        <mxCell id="lh-api"         value="Anthropic API"      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1200" y="80" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="lh-api"         value="Runner / API"       style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1200" y="80" width="130" height="50" as="geometry"/></mxCell>
         <mxCell id="lh-disk"        value="Disk (files/git)"   style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1390" y="80" width="130" height="50" as="geometry"/></mxCell>
 
         <!-- Lifelines (dashed vertical lines) -->
@@ -36,8 +36,8 @@
         <mxCell id="s1" value="harness run harness_config.json" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="125" y="185" as="sourcePoint"/><mxPoint x="315" y="185" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s2" value="run(brief)" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="315" y="205" as="sourcePoint"/><mxPoint x="505" y="205" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s3" value="set_feature_list tool call" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="225" as="sourcePoint"/><mxPoint x="1265" y="225" as="targetPoint"/></mxGeometry></mxCell>
-        <mxCell id="s4" value="features + init.sh content" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="245" as="sourcePoint"/><mxPoint x="505" y="245" as="targetPoint"/></mxGeometry></mxCell>
-        <mxCell id="s5" value="save features.json + init.sh + git commit" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="265" as="sourcePoint"/><mxPoint x="1455" y="265" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s4" value="features + startup script content" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1265" y="245" as="sourcePoint"/><mxPoint x="505" y="245" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="s5" value="save features.json + startup script + git commit" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="265" as="sourcePoint"/><mxPoint x="1455" y="265" as="targetPoint"/></mxGeometry></mxCell>
         <mxCell id="s6" value="ProjectProgress" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="505" y="285" as="sourcePoint"/><mxPoint x="315" y="285" as="targetPoint"/></mxGeometry></mxCell>
 
         <!-- ── PHASE 2: PLAN ── -->

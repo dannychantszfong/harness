@@ -229,6 +229,9 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 | `openai_api_key` | str\|None | `None` | Documents the OpenAI key the project expects (set `OPENAI_API_KEY` env var to use it) |
 | `gemini_api_key` | str\|None | `None` | Documents the Gemini key the project expects (set `GEMINI_API_KEY` env var) |
 | `openrouter_api_key` | str\|None | `None` | Documents the OpenRouter key the project expects (set `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`) |
+| `init_script` | str\|None | platform-derived | Optional startup script filename override inside `output_dir` |
+| `init_script_type` | `"bash"`\|`"powershell"`\|`"cmd"`\|None | platform-derived | Startup script flavor; defaults to bash on macOS/Linux and PowerShell on Windows |
+| `startup_command` | str\|None | platform-derived | Optional command override for generator/evaluator startup checks |
 | `project_git_push` | bool | `False` | Auto-push this output project repo during workflow seams |
 | `project_git_branch` | str | `"main"` | Branch name for newly initialized output repos |
 | `project_git_remote` | str\|None | `None` | Existing git remote URL to set as `origin` |
@@ -324,6 +327,9 @@ result = runner.implement(prompt, cwd="/my/project")
   "codex_oss": false,
   "codex_local_provider": null,
   "code_runner_extra_args": [],
+  "init_script": null,
+  "init_script_type": null,
+  "startup_command": null,
   "openai_api_key": null,
   "gemini_api_key": null,
   "openrouter_api_key": null,

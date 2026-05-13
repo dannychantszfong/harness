@@ -139,7 +139,8 @@ kill -SIGINT $(cat harness.pid)
 output/my_project/
 ├── features.json              # Source of truth: feature list + status + eval history
 ├── progress.md                # Human-readable summary (auto-updated)
-├── init.sh                    # App startup script
+├── init.sh / init.ps1 / init.bat
+│                              # Platform startup script
 ├── handoff_session_0001.json  # Context reset handoffs
 ├── .git/                      # One commit per passing feature
 ├── src/                       # Generated application code (agentic runners)

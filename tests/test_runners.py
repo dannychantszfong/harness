@@ -394,6 +394,28 @@ def test_codex_rate_limit_hint_sets_flag(tmp_config, monkeypatch):
 
     assert result.success is False
     assert result.rate_limited is True
+    # Codex 429 messages don't carry a parseable reset time — that's fine.
+    # The rate_limited flag alone is enough to trigger profile rotation.
+    assert result.rate_limit_reset_at is None
+
+
+def test_codex_rate_limit_parses_reset_time_when_present(tmp_config, monkeypatch):
+    """If codex's stdout/stderr happens to contain the strict reset pattern,
+    we populate rate_limit_reset_at the same way subprocess + sdk do.
+    Cross-runner parity for rate-limit handling is the contract."""
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = "You've hit your limit · resets 9:30pm (Europe/London)"
+    mock_result.stderr = ""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+
+    result = CodexRunner(tmp_config).implement("prompt", cwd="/tmp")
+
+    assert result.success is False
+    assert result.rate_limited is True
+    assert result.rate_limit_reset_at is not None
+    assert result.rate_limit_reset_at.tzinfo is not None
 
 
 def test_codex_success(tmp_config, monkeypatch):

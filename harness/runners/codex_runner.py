@@ -12,23 +12,14 @@ import subprocess
 import shutil
 from rich.console import Console
 
+from harness.runners._rate_limit import (
+    looks_rate_limited as _looks_rate_limited,
+    parse_reset_time as _parse_reset_time,
+)
 from harness.runners.base import CodeRunner, PreflightResult, RunResult, RunnerType
 from harness.ui import QuietAnimator
 
 console = Console()
-
-_RATE_LIMIT_HINTS = (
-    "rate limit",
-    "usage limit",
-    "quota",
-    "too many requests",
-    "429",
-)
-
-
-def _looks_rate_limited(text: str) -> bool:
-    lowered = text.lower()
-    return any(hint in lowered for hint in _RATE_LIMIT_HINTS)
 
 
 class CodexRunner(CodeRunner):
@@ -125,11 +116,14 @@ class CodexRunner(CodeRunner):
 
         if result.returncode != 0:
             combined = f"{result.stdout or ''}\n{result.stderr or ''}"
+            reset_at = _parse_reset_time(combined)
+            rate_limited = reset_at is not None or _looks_rate_limited(combined)
             return RunResult(
                 output=result.stdout,
                 success=False,
                 error=result.stderr or f"codex exited with code {result.returncode}",
-                rate_limited=_looks_rate_limited(combined),
+                rate_limit_reset_at=reset_at,
+                rate_limited=rate_limited,
             )
 
         return RunResult(

@@ -217,7 +217,7 @@ ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY \
 
 For each run, verify:
 - [ ] `features.json` created with all features PENDING
-- [ ] `init.sh` created and executable
+- [ ] Platform startup script created (`init.sh`, `init.ps1`, or `init.bat`; bash script executable)
 - [ ] First feature moves IN_PROGRESS, then PASSING or FAILING
 - [ ] Sprint contract saved to `features.json`
 - [ ] `progress.md` updated with correct percentages
