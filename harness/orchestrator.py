@@ -27,8 +27,13 @@ from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.agents import InitializerAgent, PlannerAgent, GeneratorAgent, EvaluatorAgent
 from harness.agents.base import _number
 from harness.runners import create_runner, RunnerType
-from harness.runners.base import RunnerRateLimitedError, RunnerTimeoutError
-from harness import auto_resume
+from harness.runners.base import (
+    RunnerFailedError,
+    RunnerRateLimitedError,
+    RunnerTimeoutError,
+    RunnerTurnLimitError,
+)
+from harness import auto_resume, run_lock
 from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
 from harness.progress.attempts import read_lessons, write_attempt_notes
@@ -41,9 +46,11 @@ from harness.progress.tracker import (
 from harness.progress.models import EvaluationResult, FeatureStatus, ProjectProgress
 from harness.project_git import (
     ProjectGitConfigurationError,
+    absorb_nested_repos,
     commit_all,
     commit_paths,
     create_branch,
+    dirty_paths,
     ensure_project_gitignore,
     git_head,
     ignored_untracked_paths,
@@ -64,6 +71,11 @@ console = Console()
 
 class EvaluatorUnavailableError(RuntimeError):
     """The evaluator session failed (not a parse problem) even after a retry."""
+
+
+class GeneratorUnavailableError(RuntimeError):
+    """The generator's runner failed twice in a row (R-05): missing binary,
+    expired sign-in, crash — not something more iterations can fix."""
 
 
 class Orchestrator:
@@ -162,6 +174,19 @@ class Orchestrator:
         """
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        # One run per project (R-03): raises ProjectLockedError if another
+        # live Harness process holds the lock.
+        with run_lock.hold(output_dir, command="harness"):
+            self._run(output_dir, confirmed_spec=confirmed_spec, review_only=review_only)
+
+    def _run(
+        self,
+        output_dir: Path,
+        confirmed_spec: str | None,
+        review_only: bool,
+    ) -> None:
+        if auto_resume.cancel_pending(output_dir, self.config.project_id):
+            console.print("[dim]Cancelled the scheduled auto-resume — this run takes over.[/dim]")
 
         console.print(
             Panel(
@@ -194,14 +219,20 @@ class Orchestrator:
         except RunnerRateLimitedError as exc:
             self._handle_rate_limit(exc)
             return
-        except EvaluatorUnavailableError as exc:
+        except (EvaluatorUnavailableError, GeneratorUnavailableError) as exc:
+            role = "evaluator" if isinstance(exc, EvaluatorUnavailableError) else "generator"
+            what = (
+                "this iteration was not graded or counted"
+                if role == "evaluator"
+                else "the iteration was not counted and the feature stays in progress"
+            )
             console.print(
                 Panel(
-                    f"The evaluator failed twice in a row, so this iteration was not graded "
-                    f"or counted.\n\n{str(exc)[:1500]}\n\n"
-                    "Fix the evaluator's runner (sign-in, binary, profile), then run:\n"
+                    f"The {role}'s runner failed twice in a row, so {what}.\n\n"
+                    f"{escape(str(exc)[:1500])}\n\n"
+                    f"Fix the {role}'s runner (sign-in, binary on PATH, profile env), then run:\n"
                     f"  [bold]harness resume {self.config.output_dir}[/bold]",
-                    title="[red]Stopped — evaluator unavailable[/red]",
+                    title=f"[red]Stopped — {role} unavailable[/red]",
                     border_style="red",
                 )
             )
@@ -464,11 +495,15 @@ class Orchestrator:
             # old base only survives a direct continuation of this feature;
             # if anything else ran since, HEAD now holds other features'
             # work and is the new base.
+            fresh_base = progress.current_feature_id != feature.id
+            base = None
+            if fresh_base:
+                progress, base = self._fresh_base(progress, feature.id)
             progress = self.tracker.mark_in_progress(
                 progress,
                 feature.id,
-                base_commit_sha=git_head(project_dir),
-                fresh_base=progress.current_feature_id != feature.id,
+                base_commit_sha=base,
+                fresh_base=fresh_base,
             )
             feature = progress.get_feature(feature.id)
 
@@ -510,6 +545,7 @@ class Orchestrator:
             passed = False
             last_self_eval: str | None = None
             iteration = feature.iteration_count
+            generator_retried = False
 
             while iteration < self.config.max_iterations_per_feature:
                 # Seam 2: between iterations within a feature — model swaps,
@@ -545,6 +581,23 @@ class Orchestrator:
                     feature = progress.get_feature(feature.id)
                     evaluator_feedback = result.feedback
                     continue
+                except RunnerFailedError as exc:
+                    # R-05: a broken runner is not a failed attempt. Retry once
+                    # without counting; then stop, the feature left in progress.
+                    gen_agent = gen_holder.get("agent")
+                    if gen_agent is not None:
+                        progress = self._account_usage(progress, gen_agent, feature.id)
+                    if generator_retried:
+                        raise GeneratorUnavailableError(exc.raw_message or str(exc)) from exc
+                    generator_retried = True
+                    first_line = (str(exc).splitlines() or [""])[0][:200]
+                    console.print(
+                        f"  [yellow]Generator runner failed ({escape(first_line)}) — "
+                        "retrying once; this iteration is not counted.[/yellow]"
+                    )
+                    iteration -= 1
+                    continue
+                generator_retried = False
                 last_self_eval = self_eval
                 gen_agent = gen_holder.get("agent")
                 if gen_agent is not None:
@@ -693,19 +746,87 @@ class Orchestrator:
         exists even if it did not. Records HEAD as the feature's commit_sha.
         """
         feature = progress.get_feature(feature_id)
-        project_dir = Path(self.config.output_dir)
         message = f"feat({feature.id}): {feature.name} — score {score:.1f}"
         try:
-            sha = commit_all(project_dir, message)
+            sha = self._commit_all(message)
         except (subprocess.CalledProcessError, OSError) as exc:
-            detail = getattr(exc, "stderr", None) or str(exc)
-            console.print(f"  [yellow]Could not commit feature {feature.id}: {detail}[/yellow]")
+            detail = (getattr(exc, "stderr", None) or str(exc)).strip()
+            console.print(
+                Panel(
+                    f"Could not commit feature {feature.id}: {escape(detail[-1500:])}\n\n"
+                    "It stays marked passing. Harness commits the working tree again before "
+                    "the next feature starts, and does not reset the tree for an exhausted "
+                    "attempt while a passing feature is uncommitted.",
+                    title="[yellow]Recovery point not recorded[/yellow]",
+                    border_style="yellow",
+                )
+            )
             return progress
         if sha is None:
             console.print("  [yellow]Not a git repository — no recovery point recorded.[/yellow]")
             return progress
         console.print(f"  [green]Recovery point:[/green] {sha[:10]}  {message}")
         return self.tracker.record_commit(progress, feature.id, sha)
+
+    def _commit_all(self, message: str) -> str | None:
+        """commit_all, reporting nested repositories it had to absorb (R-04)."""
+        project_dir = Path(self.config.output_dir)
+        if is_git_repo(project_dir):
+            for path, how in absorb_nested_repos(project_dir):
+                if how == "absorbed":
+                    console.print(
+                        f"  [yellow]{escape(path)}/ had its own .git (a scaffolder's `git init`?); "
+                        "committed as plain files, its history kept under "
+                        ".git/harness/nested-repos/.[/yellow]"
+                    )
+                else:
+                    console.print(
+                        f"  [yellow]{escape(path)}/ is a nested git repository that could not be "
+                        "absorbed; kept out of git via .git/info/exclude.[/yellow]"
+                    )
+        return commit_all(project_dir, message)
+
+    def _fresh_base(self, progress: ProjectProgress, feature_id: str) -> tuple[ProjectProgress, str | None]:
+        """The commit a feature starting now may later be reset to (ADR-015).
+
+        Everything on disk is committed first (R-01): a passing feature
+        whose Harness commit failed (a pre-commit hook, Harness killed
+        before committing) must be part of the base, or an exhausted
+        attempt's reset would delete it. Passing features without a commit
+        get this commit recorded. If the commit fails, no base is recorded
+        and the attempt is never reset.
+        """
+        project_dir = Path(self.config.output_dir)
+        if not is_git_repo(project_dir):
+            return progress, None
+        unrecorded = [
+            f for f in progress.features
+            if f.status == FeatureStatus.PASSING and not f.commit_sha
+        ]
+        # Harness's own state files are restored around a reset anyway;
+        # changes to them alone need no snapshot commit.
+        state = set(self._state_relpaths())
+        if any(path not in state for path in dirty_paths(project_dir)):
+            if unrecorded:
+                ids = ", ".join(f.id for f in unrecorded)
+                message = f"feat({ids}): passing work committed by Harness before {feature_id}"
+            else:
+                message = f"chore(harness): snapshot before {feature_id}"
+            try:
+                self._commit_all(message)
+            except (subprocess.CalledProcessError, OSError) as exc:
+                detail = (getattr(exc, "stderr", None) or str(exc)).strip()
+                console.print(
+                    f"  [yellow]Could not commit the working tree before {feature_id} "
+                    f"({escape(detail[-300:])}); this feature's attempt will not be reverted "
+                    "if it exhausts its budget, so nothing uncommitted can be lost.[/yellow]"
+                )
+                return progress, None
+        head = git_head(project_dir)
+        if head:
+            for f in unrecorded:
+                progress = self.tracker.record_commit(progress, f.id, head)
+        return progress, head
 
     def _handle_exhausted(
         self,
@@ -737,8 +858,7 @@ class Orchestrator:
             snapshot = self._snapshot_state_files()
             try:
                 ignored_before = ignored_untracked_paths(project_dir)
-                attempt_commit = commit_all(
-                    project_dir,
+                attempt_commit = self._commit_all(
                     f"wip({feature.id}): exhausted attempt {attempt_number} (preserved by Harness)",
                 )
                 if attempt_commit and attempt_commit != base:
@@ -749,6 +869,9 @@ class Orchestrator:
                         if skipped_reason is None:
                             reset_hard(project_dir, base)
                             reverted = True
+                            # Harness's own runtime files first, so they are
+                            # not reported as the attempt's leftovers.
+                            ensure_project_gitignore(project_dir)
                             kept_out = keep_excluded(project_dir, ignored_before)
             except (subprocess.CalledProcessError, OSError) as exc:
                 detail = getattr(exc, "stderr", None) or str(exc)
@@ -817,7 +940,15 @@ class Orchestrator:
         """
         project_dir = Path(self.config.output_dir)
         for other in progress.features:
-            if other.id == feature_id or not other.commit_sha:
+            if other.id == feature_id:
+                continue
+            if other.status == FeatureStatus.PASSING and not other.commit_sha:
+                # R-01: its files may exist only in the working tree.
+                return (
+                    f"feature {other.id} passed but has no Harness commit; resetting could "
+                    "remove its files. The attempt's code stays in place."
+                )
+            if not other.commit_sha:
                 continue
             if is_ancestor(project_dir, other.commit_sha, head) and not is_ancestor(
                 project_dir, other.commit_sha, base
@@ -844,8 +975,10 @@ class Orchestrator:
         files = [project_dir / name for name in sorted(names)]
         files += sorted(project_dir.glob("handoff_session_*.json"))
         harness_dir = project_dir / ".harness"
+        lock = run_lock.lock_path(project_dir)
         if harness_dir.is_dir():
-            files += sorted(p for p in harness_dir.rglob("*") if p.is_file())
+            # Not the run lock: it is held open (and locked) by this process.
+            files += sorted(p for p in harness_dir.rglob("*") if p.is_file() and p != lock)
         return [p for p in files if p.is_file()]
 
     def _snapshot_state_files(self) -> dict[Path, bytes]:
@@ -858,8 +991,13 @@ class Orchestrator:
 
     @staticmethod
     def _timeout_result(exc: RunnerTimeoutError, iteration: int) -> EvaluationResult:
-        """A failed, ungraded iteration for a generator session that timed out."""
-        limit = f" after {exc.timeout_seconds}s" if exc.timeout_seconds else ""
+        """A failed, ungraded iteration for a generator session that timed out
+        (or used up its turn limit)."""
+        if isinstance(exc, RunnerTurnLimitError):
+            ended, reason = "used up its turn limit", "generator_turn_limit"
+        else:
+            limit = f" after {exc.timeout_seconds}s" if exc.timeout_seconds else ""
+            ended, reason = f"timed out{limit}", "generator_timeout"
         return EvaluationResult(
             design_quality=0.0,
             originality=0.0,
@@ -867,14 +1005,14 @@ class Orchestrator:
             functionality=0.0,
             overall_score=0.0,
             feedback=(
-                f"The implementation session timed out{limit} and was not evaluated. "
+                f"The implementation session {ended} and was not evaluated. "
                 "Work in smaller steps: get the core of the feature working first, "
                 "commit, then refine. Avoid long-running or interactive commands "
                 "(dev servers, watchers) that never exit."
             ),
             passed=False,
             iteration=iteration,
-            failure_reason="generator_timeout",
+            failure_reason=reason,
         )
 
     def _reload_config_if_changed(self) -> dict[str, tuple]:

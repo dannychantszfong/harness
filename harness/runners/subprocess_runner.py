@@ -219,6 +219,7 @@ class SubprocessRunner(CodeRunner):
                 error="\n".join(parts),
                 rate_limit_reset_at=reset_at,
                 rate_limited=rate_limited,
+                turn_limited=bool(data and data.get("subtype") == "error_max_turns"),
                 cost_usd=cost,
                 session_id=session_id,
                 **usage,

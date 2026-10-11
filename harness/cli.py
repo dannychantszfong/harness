@@ -15,6 +15,7 @@ from harness.config import (
     check_env_secrets,
     check_url_credentials,
 )
+from harness import process_guard, run_lock
 from harness.orchestrator import Orchestrator
 from harness.progress.models import FeatureStatus
 from harness.progress.tracker import ProgressTracker, usage_summary
@@ -517,9 +518,29 @@ Reference guide:
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
+# Commands that start agent sessions: they must not outlive Harness (R-02).
+_AGENT_COMMANDS = frozenset({"new", "run", "resume", "import", "init", "plan"})
+
+
 @click.group()
 def main():
     """Agent Harness — long-running multi-session agent orchestration."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and ctx.invoked_subcommand in _AGENT_COMMANDS:
+        process_guard.install()
+
+
+def _claim_project(project_dir: str | Path, command: str) -> None:
+    """Take the project's run lock for this process, or exit (R-03).
+
+    Taken before anything writes into the project, so a second instance
+    cannot rewrite harness_config.json under a running one.
+    """
+    try:
+        run_lock.claim(Path(project_dir), command=command)
+    except run_lock.ProjectLockedError as exc:
+        console.print(Panel(str(exc), title="[red]Already running[/red]", border_style="red"))
+        raise SystemExit(1)
 
 
 def _slugify(name: str) -> str:
@@ -849,6 +870,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
 def run(config_file: str, runner: str | None, model: str | None):
     """Run the full harness for a project defined in CONFIG_FILE."""
     config = _load_config_file(config_file)
+    _claim_project(config.output_dir, "harness run")
     if runner is None:
         _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
@@ -900,6 +922,7 @@ def resume(project_dir: str, runner: str | None, model: str | None):
             f"[dim]A resumable project should contain {CONFIG_FILENAME} at its root.[/dim]"
         )
         raise SystemExit(1)
+    _claim_project(project_path, "harness resume")
 
     # P-01: the directory we were given is the project. A relative output_dir
     # recorded by an older Harness would otherwise resolve against the cwd
@@ -1068,6 +1091,9 @@ def _run_orchestrator(orchestrator: Orchestrator, **kwargs) -> None:
     except CorruptFeaturesFileError as exc:
         console.print(Panel(str(exc), title="[red]Progress file problem[/red]", border_style="red"))
         raise SystemExit(1)
+    except run_lock.ProjectLockedError as exc:
+        console.print(Panel(str(exc), title="[red]Already running[/red]", border_style="red"))
+        raise SystemExit(1)
 
 
 @main.command("import")
@@ -1186,6 +1212,7 @@ def import_repo(
             ".git", "node_modules", "__pycache__", ".venv", "venv",
             "dist", "build", ".pytest_cache", ".mypy_cache", "target",
         ))
+    _claim_project(output_dir, "harness import")
 
     # ── Step 3: Resolve runner ────────────────────────────────────────────
     saved_setup = load_setup()
@@ -1474,6 +1501,7 @@ def status(config_file: str):
 def init(config_file: str, brief: str, project_name: str | None):
     """Initialize a new project (features.json, init.sh, first git commit)."""
     config = _load_config_file(config_file)
+    _claim_project(config.output_dir, "harness init")
     _apply_saved_setup(config)
     if project_name:
         config.project_name = project_name
@@ -1505,6 +1533,7 @@ def init(config_file: str, brief: str, project_name: str | None):
 def plan(config_file: str):
     """Run only the planner agent to expand the brief into a spec."""
     config = _load_config_file(config_file)
+    _claim_project(config.output_dir, "harness plan")
     _apply_saved_setup(config)
     tracker = ProgressTracker(config)
     progress = tracker.load()

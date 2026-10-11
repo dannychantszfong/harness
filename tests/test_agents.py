@@ -241,6 +241,10 @@ def test_runner_usage_accumulates_even_on_failure(runner_config):
         output="partial", success=False, error="boom", input_tokens=100, output_tokens=20, cost_usd=0.5,
     )
     agent = GeneratorAgent(runner_config, runner=runner)
-    agent.implement_feature(feature=Feature(id="f1", name="A", description="a"), progress=MagicMock(), session_preamble="")
+    # R-05: a runner failure is raised, not handed to the evaluator as text.
+    from harness.runners.base import RunnerFailedError
+
+    with pytest.raises(RunnerFailedError):
+        agent.implement_feature(feature=Feature(id="f1", name="A", description="a"), progress=MagicMock(), session_preamble="")
     assert agent.usage.total_tokens == 120
     assert agent.usage.cost_usd == pytest.approx(0.5)

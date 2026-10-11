@@ -96,6 +96,12 @@ whether the latest handoff applies to that feature. Order of work:
    across runs;
 3. exhausted features are skipped and listed (see INC-14).
 
+Only one Harness works on a project at a time: a second `run`/`resume`
+stops with "Another Harness run is already working on …" (INC-18). Resuming
+by hand cancels a pending auto-resume job, and when Harness stops (Ctrl+C,
+closed terminal, `kill`) its agent sessions stop with it, so a resume never
+starts a second agent on top of a leftover one.
+
 ---
 
 ## Project GitHub Sync
@@ -356,7 +362,8 @@ harness resume output/<project_dir>
 last self-evaluation), and reset the working branch to the commit the
 feature started from (ADR-015) — unless that would remove another
 feature's recovery commit, in which case the code stays in place. Files the
-attempt had git-ignored stay on disk, listed in `.git/info/exclude`. Other
+attempt had git-ignored stay on disk, listed in `.git/info/exclude`. A reset
+never runs while a passing feature has no Harness commit (INC-20). Other
 features continued.  
 **Fix:** read the notes; then either raise `max_iterations_per_feature` or
 sharpen the feature's description in `features.json` while Harness is not
@@ -384,10 +391,47 @@ feature's budget was spent and nothing was reverted.
 
 ---
 
+### INC-18: "Already running — Another Harness run is already working on …"
+**Cause:** another live Harness process (pid, host and command are in the
+message) holds `<project>/.harness/run.lock`: a second terminal, or the
+scheduled auto-resume firing while you run Harness by hand.  
+**What Harness did:** refused to start before touching any file.  
+**Fix:** wait for the other run or stop it (Ctrl+C in its terminal, or end
+the pid). The lock is an OS lock, released when its process exits, so there
+is nothing to delete; on Windows allow a few seconds after a crash.
+
+---
+
+### INC-19: "Stopped — generator unavailable"
+**Cause:** the generator's runner failed twice in a row for a reason other
+than a timeout, a turn limit or a usage cap: `claude`/`codex` not on the
+`PATH` of the process (common for scheduled runs), an expired sign-in, an
+unresolved `$VAR` in a profile env, a crash.  
+**What Harness did:** retried once, then stopped. Neither attempt was
+counted against the feature's budget; the feature stays `in_progress`.  
+**Fix:** run the runner by hand in the project directory (`claude -p hi`,
+`codex exec hi`) until it works, then `harness resume output/<project_dir>`.
+
+---
+
+### INC-20: "Recovery point not recorded"
+**Cause:** Harness's own commit of a passing feature failed — usually the
+project's pre-commit hook (husky, lint-staged, a formatter) rejected it.  
+**What Harness did:** kept the feature passing and its files on disk.
+Before the next feature starts it commits the working tree again; until a
+commit succeeds, no exhausted attempt is reset, so nothing uncommitted can
+be lost. Harness does not bypass hooks.  
+**Fix:** make the hook pass (or exempt Harness's commits from it), then
+`harness resume`; the passing work is committed before the next feature.
+
+---
+
 ### INC-16: Config fails to load — "holds a literal secret"
 **Cause:** an API-key field or a secret-looking env value
-(`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), a `--api-key …`-style extra
-argument, or a git remote with embedded credentials
+(`*KEY`, `*TOKEN`, `*SECRET`, `*PASSWORD`, `*_PASS`, `AUTH`, `CREDENTIALS`,
+a credential-shaped value such as `sk-…`/`ghp_…`, a URL with a password), a
+`--api-key …` or `api_key=…` inside an extra argument, or a git remote with
+embedded credentials
 (`https://<token>@github.com/…`) in `harness_config.json` or
 `~/.harness/setup.json` contains the secret itself. These files are
 committed / copied into project repos.  
@@ -416,7 +460,10 @@ dir>` five minutes after the reset. Every wrapper writes to
 `<project>/auto_resume.log`, removes its own schedule before resuming,
 carries the `PATH` (and `HARNESS_SETUP_CONFIG`) from scheduling time so the
 resumed run finds `claude`/`codex`, and never contains secrets — API-key env
-vars must be available in your login environment.
+vars must be available in your login environment. The wrappers set
+`HARNESS_AUTO_RESUME_JOB=1`; any other run of Harness on the project cancels
+a pending job (and deletes its wrapper), and the run lock refuses a job that
+fires while another run is active.
 
 | Backend | Status | Mechanism |
 |---|---|---|
@@ -466,6 +513,35 @@ PY
 
 Then check `output/toy/auto_resume.log` and `systemctl --user list-timers`,
 and record the result here and in ADR-012.
+
+---
+
+## Read-only sessions: verified CLI behaviour
+
+Planner, evaluator and sprint-contract sessions are restricted by the agent
+CLI itself, which the test suite cannot exercise (CI has no `claude` or
+`codex`). Verified on 2026-10-11 with **`claude` 2.1.296** and
+**`codex-cli` 0.160**:
+
+- `claude -p --permission-mode dontAsk --allowedTools Read Grep Glob "Bash(git status)" --disallowedTools Write Edit MultiEdit NotebookEdit`
+  refuses a Write and any Bash command not on the list (such as
+  `git log --output=x`) instead of prompting;
+- `codex exec --sandbox read-only` refuses writes (OS-enforced sandbox).
+
+Re-check both after upgrading either CLI: in a scratch directory, ask a
+read-only session to create a file and to run `git log --output=x`; neither
+file may appear. Limits that remain by design: `Bash(<test command> *)`
+accepts any arguments to the test runner, and the startup script runs as
+written.
+
+**Process lifetime.** Sessions started by the `subprocess` and `codex`
+runners lead their own process group and are killed with their children
+when Harness exits through Ctrl+C, SIGTERM or SIGHUP. On Windows the
+kill-on-close job object covers every exit, including Task Manager. On
+Linux, a SIGKILLed Harness takes the session's main process with it
+(`PR_SET_PDEATHSIG`), but not grandchildren that process had started; on
+macOS SIGKILL is not covered. The `sdk` runner relies on the SDK closing its
+`claude` process (plus the job object on Windows).
 
 ---
 

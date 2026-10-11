@@ -326,7 +326,7 @@ Jira or any external backlog as source of truth · orchestrator / coder role spl
 
 ## 9. Implementation record (2026-10-11)
 
-Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Harness 2.0), `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`. Suite: 360 passed, 3 skipped (macOS-only launchd tests and the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`.
+Branch `harness-1.0`, one commit and tag per phase: `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`; `v1.0-a` (fork point for Harness 2.0) and `v1.0` were moved to the review-pass-2 commit, because R-02 changed the Phase A runner layer. Suite: 401 passed, 6 skipped (macOS-only launchd tests, POSIX/Linux-only signal tests, a symlink test where symlinks are not permitted, the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`; the packaging build passes separately (`HARNESS_PACKAGING_TESTS=1`).
 
 **Scope notes**
 
@@ -337,6 +337,18 @@ Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Har
 - Verified against the installed CLIs: `claude` 2.1.296 (stdin prompt, `--output-format json` shape, `--permission-mode dontAsk` + `--allowedTools` enforcement) and `codex-cli` 0.160 (`exec -`, `--json` events, `--output-last-message`, `--sandbox read-only`).
 
 **Review pass.** An independent review of the diff found 12 issues, all fixed with regression tests (`tests/test_review_fixes.py`): the exhausted-attempt follow-up commit could stage files the attempt had git-ignored (e.g. `.env`); a stale base commit could revert another feature's passing commit; wildcard git rules let read-only sessions write files (`git log --output=`); agents could loosen grading via `harness_config.json`; config reloads dropped `--runner`/`--model` overrides; timeouts did not kill process trees behind Windows `.cmd` shims; SDK rate-limit detection scanned the transcript; malformed api-mode tool input crashed the run; an evaluator outage burned every budget and reverted ungraded work; typographic apostrophes broke the PowerShell wrapper; credentials in git remotes / CLI args were not caught; `harness run file.yaml` left no resumable project config (pre-existing).
+
+**Review pass 2** (`docs/HARNESS_1.0_REVIEW_PASS_2.md`, acceptance review of `v1.0`). All findings fixed with regression tests (`tests/test_review_pass2.py`); five of them were confirmed to fail against the old `v1.0` code:
+
+- R-01: a passing feature whose Harness commit failed (rejecting pre-commit hook, or Harness killed before committing) could be deleted by a later exhausted attempt's reset. Harness now commits the working tree before recording a feature's base (Harness state files alone need no commit), records that commit for passing features that lacked one, refuses a base when that commit fails, and never resets while a passing feature has no commit (ADR-015).
+- R-02: agent sessions survived SIGTERM/SIGHUP to Harness (a Phase A regression from `start_new_session`). SIGTERM/SIGHUP now take the same kill-the-tree path as Ctrl+C; Linux sessions get `PR_SET_PDEATHSIG`; on Windows Harness runs in a kill-on-close job object (ADR-017).
+- R-03: no single-instance guard. `run`/`resume`/`import`/`init`/`plan` take an OS lock on `.harness/run.lock` before writing anything, and a run cancels a pending auto-resume job (ADR-017).
+- R-04: nested repositories from scaffolders were committed as dangling gitlinks and survived resets; their `.git` now moves to `.git/harness/nested-repos/` and the files are committed as plain files.
+- R-05: generator runner failures were graded and spent the feature budget. They are retried once without counting, then the run stops with the feature in progress; a turn-limit end is recorded like a timeout.
+- R-06: api-mode `search` followed symlinks out of the project; git short-option bundles (`-pO<file>`) and long-option abbreviations (`--outp=`) are refused too.
+- R-07: `.gitattributes` (`* text=auto eol=lf`), CI also runs on pushes to `harness-*` branches, `LS` dropped from the read-only tool list.
+- N-01: the literal-secret check now also covers `APIKEY`, `GHTOKEN`, `AUTH`, `CREDENTIALS`, `*_PASS`, credential-shaped values (`sk-…`, `ghp_…`, `AKIA…`), URLs with a password and secrets inside extra arguments (`--settings` JSON, `-c …api_key=…`); its limits are in README "Safety". Also fixed: `--max-tokens` was mistaken for a secret flag.
+- N-02: the verified CLI versions and a re-check procedure are in the runbook ("Read-only sessions: verified CLI behaviour").
 
 **Definition of Done (§5)**
 

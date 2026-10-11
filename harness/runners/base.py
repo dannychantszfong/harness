@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 from typing import Optional
 
 # Fallback when a config object does not carry runner_timeout_seconds.
@@ -69,6 +70,30 @@ class RunnerTimeoutError(RuntimeError):
         else:
             message = "Runner session timed out"
         super().__init__(message)
+
+
+class RunnerTurnLimitError(RunnerTimeoutError):
+    """The generator session ended because it used up its turn budget
+    (sdk_max_turns, or --max-turns in the extra args). Recorded like a
+    timeout: a failed, ungraded iteration with advice to work in steps."""
+
+    def __init__(self, raw_message: str = ""):
+        super().__init__(None, raw_message)
+        self.args = ("Runner session hit its turn limit",)
+
+
+class RunnerFailedError(RuntimeError):
+    """The generator's runner failed for a reason other than a timeout, a
+    turn limit or a usage cap: missing binary, expired sign-in, a crash.
+
+    Not a self-evaluation to grade. The orchestrator retries once without
+    counting the iteration, then stops the run with the feature left in
+    progress, so a broken runner cannot march every feature to exhaustion.
+    """
+
+    def __init__(self, raw_message: str = ""):
+        self.raw_message = raw_message
+        super().__init__(raw_message or "Runner session failed")
 
 
 class RunnerType(str, Enum):
@@ -131,6 +156,8 @@ class RunResult:
     session_id: Optional[str] = None
     # True when the session was killed by the runner timeout.
     timed_out: bool = False
+    # True when the session ended because it used up its turn budget.
+    turn_limited: bool = False
     # Tool calls observed (SDK runner only)
     tool_calls_observed: list[str] = field(default_factory=list)
     # Subscription rate-limit reset time (UTC) when the runner hit a usage cap.
@@ -190,7 +217,7 @@ def default_read_only_tools(config) -> list[str]:
     Which of these the agent uses, and in what order, is its own judgement;
     this is only the permission boundary.
     """
-    tools = ["Read", "Grep", "Glob", "LS"]
+    tools = ["Read", "Grep", "Glob"]
     tools += [f"Bash({command})" for command in SAFE_GIT_COMMANDS]
     startup = getattr(config, "startup_command_for_platform", None)
     test = getattr(config, "test_command", None)
@@ -328,6 +355,47 @@ def kill_process_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def _linux_pdeathsig():
+    """preexec_fn giving a child SIGKILL when Harness dies, or None.
+
+    Resolved once in the parent: the child only makes one C call between
+    fork and exec.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import ctypes
+
+        prctl = ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, AttributeError):
+        return None
+    pr_set_pdeathsig = 1
+    parent = os.getpid()
+
+    def _preexec() -> None:
+        prctl(pr_set_pdeathsig, signal.SIGKILL)
+        if os.getppid() != parent:  # Harness died before prctl took effect
+            os.kill(os.getpid(), signal.SIGKILL)
+
+    return _preexec
+
+
+def child_popen_kwargs() -> dict:
+    """Popen kwargs for an agent session or an allow-listed command.
+
+    POSIX: the child leads its own session, so kill_process_tree can kill
+    the whole group; on Linux it also dies with Harness (PDEATHSIG). Windows
+    needs nothing here: the kill-on-close job (process_guard) covers it.
+    """
+    if os.name == "nt":
+        return {}
+    kwargs: dict = {"start_new_session": True}
+    preexec = _linux_pdeathsig()
+    if preexec is not None:
+        kwargs["preexec_fn"] = preexec
+    return kwargs
+
+
 def run_process(
     cmd: list[str],
     *,
@@ -338,11 +406,10 @@ def run_process(
 ) -> subprocess.CompletedProcess:
     """subprocess.run(capture_output=True, text=True) that enforces its timeout.
 
-    On timeout (and on Ctrl+C) the whole process tree is killed before
-    TimeoutExpired is raised, so a hung agent behind a shim cannot hang
-    Harness.
+    On timeout, Ctrl+C, SIGTERM/SIGHUP (SystemExit via process_guard) the
+    whole process tree is killed before the exception propagates, so a hung
+    agent behind a shim cannot hang Harness and no agent outlives it.
     """
-    popen_kwargs: dict = {} if os.name == "nt" else {"start_new_session": True}
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -353,7 +420,7 @@ def run_process(
         text=True,
         encoding="utf-8",
         errors="replace",
-        **popen_kwargs,
+        **child_popen_kwargs(),
     )
     try:
         stdout, stderr = proc.communicate(input, timeout=timeout)
@@ -365,8 +432,9 @@ def run_process(
             pass
         raise subprocess.TimeoutExpired(cmd, timeout)
     except BaseException:
-        # e.g. KeyboardInterrupt: a child in its own session does not get
-        # the terminal's SIGINT, so stop it explicitly.
+        # KeyboardInterrupt, or SystemExit from a SIGTERM/SIGHUP handler: a
+        # child in its own session does not get the terminal's signals, so
+        # stop it explicitly.
         kill_process_tree(proc)
         raise
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)

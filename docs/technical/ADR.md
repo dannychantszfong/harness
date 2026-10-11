@@ -365,6 +365,19 @@ working tree and the next feature started on a broken baseline.
   base no longer ignores go to `.git/info/exclude`, and the follow-up
   commit stages only Harness's own files, so nothing the attempt left
   behind (e.g. `.env`) is committed or pushed.
+- A feature's base is only recorded after everything on disk apart from
+  Harness's state files is committed (`chore(harness): snapshot before
+  <id>`, or `feat(<ids>): passing work committed by Harness …` when a
+  passing feature's own commit had failed — a rejecting pre-commit hook, or
+  Harness killed before committing). Those features get that commit as
+  their `commit_sha`. If the commit fails, no base is recorded and the
+  attempt is never reset; nor is any attempt reset while a passing feature
+  has no `commit_sha`. Harness does not bypass hooks.
+- Before any `git add -A`, directories with their own `.git` (scaffolders
+  that run `git init`) are made plain directories: the nested `.git` moves
+  to `<git-dir>/harness/nested-repos/`. Otherwise git records a gitlink with
+  no `.gitmodules` (clones break) that `reset --hard` cannot remove.
+  Submodules declared in `.gitmodules` are left alone.
 
 ### Rationale
 "Revert to the last stable state, but keep the failed attempt for later
@@ -416,3 +429,51 @@ of it, in both orchestration modes.
   (`--output`, `--no-index`, `-O<file>`, `--ext-diff`, …) are refused, and
   diff/log/show always run with `--no-ext-diff --no-textconv`. Runner-mode
   read-only sessions allow only exact git invocations for the same reason.
+  Short-option bundles (`-pO<file>`) and abbreviations git would expand to
+  a refused option (`--outp=`, `--textc`, `--no-i`) are refused as well.
+- `search` skips files whose real path is outside the project (symlinks),
+  like `read_file` and `list_files`.
+
+---
+
+## ADR-017: Agent Sessions Die With Harness; One Harness per Project
+
+**Status:** Accepted (review pass 2, R-02/R-03)
+**Date:** 2026-10-11
+
+### Context
+Agents run with full write access. Phase A started each session in its own
+process group (so a timeout could kill the whole tree behind a `.cmd` or
+shell shim), which also meant the session no longer received the
+terminal's signals: when Harness was killed or its terminal closed, the
+agent kept editing the project, and `harness resume` started a second one.
+Separately, nothing stopped two Harness processes in one project — a
+manual resume followed by the scheduled auto-resume job ran two
+generators and two writers of `features.json`.
+
+### Decision
+- `process_guard.install()` (CLI commands that run agents): SIGTERM and
+  SIGHUP raise `SystemExit`, so `run_process` kills the session's process
+  group on the way out, as for Ctrl+C. Ignored signals stay ignored
+  (`nohup`). On Linux sessions also get `PR_SET_PDEATHSIG=SIGKILL`. On
+  Windows Harness joins a Job Object with `KILL_ON_JOB_CLOSE`: every child
+  is in the job from creation, and Windows kills them when Harness exits
+  in any way.
+- `run_lock`: `run`, `resume`, `import`, `init`, `plan` (and
+  `Orchestrator.run`) take an OS file lock on `<project>/.harness/run.lock`
+  (`flock`; a byte-range lock on Windows) before writing anything. The file
+  records pid, host, start time and command for the refusal message.
+- A run that is not the scheduled job itself (`HARNESS_AUTO_RESUME_JOB`)
+  cancels a pending auto-resume for the project.
+
+### Rationale
+An OS lock disappears with its process, so a crash never leaves a stale
+lock and no pid-reuse heuristics are needed. A job object is the only
+Windows mechanism that also covers a hard kill of Harness.
+
+### Consequences
+- Processes an agent leaves running (a dev server) end with Harness.
+- Not covered: a SIGKILLed Harness on macOS, and grandchildren of a
+  session on Linux after SIGKILL; the `sdk` runner's cleanup is the SDK's.
+- The lock file is not a state file: it is never snapshotted, restored or
+  committed (it is in the project's `.gitignore`).

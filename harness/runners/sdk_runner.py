@@ -240,6 +240,7 @@ class SDKRunner(CodeRunner):
                 session_id=final.get("session_id"),
                 rate_limit_reset_at=reset_at,
                 rate_limited=rate_limited,
+                turn_limited=subtype == "error_max_turns",
                 **tokens,
             )
 

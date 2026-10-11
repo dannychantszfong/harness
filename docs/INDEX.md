@@ -10,6 +10,7 @@
 | File | Description |
 |------|-------------|
 | [HARNESS_1.0_POLISH.md](HARNESS_1.0_POLISH.md) | Harness 1.0 completion and polish plan (P-xx defects, C-xx capabilities, D-01–D-04) |
+| [HARNESS_1.0_REVIEW_PASS_2.md](HARNESS_1.0_REVIEW_PASS_2.md) | Acceptance review of `v1.0` (R-01–R-07, N-01/N-02) and how each item was resolved |
 | [notes/](notes/) | Owner's working notes (roadmap, documentation and diagram checklists) |
 
 ---

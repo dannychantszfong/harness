@@ -276,7 +276,26 @@ orchestrator = Orchestrator(config)
 orchestrator = Orchestrator(config, runner_type=RunnerType.SUBPROCESS)
 orchestrator = Orchestrator(config, runner_type=RunnerType.CODEX)
 
-orchestrator.run()
+orchestrator.run()   # holds <output_dir>/.harness/run.lock for the run;
+                     # raises run_lock.ProjectLockedError if another process holds it
+```
+
+Generator failures map onto exceptions from `harness.runners.base`:
+`RunnerRateLimitedError` (rotate or pause), `RunnerTimeoutError` and its
+subclass `RunnerTurnLimitError` (a failed, ungraded iteration), and
+`RunnerFailedError` (retried once without counting, then the run stops).
+
+### `run_lock` and `process_guard`
+
+```python
+from harness import run_lock, process_guard
+
+process_guard.install()          # sessions die with this process (ADR-017)
+
+with run_lock.hold(project_dir, command="my-script"):
+    ...                          # nobody else can run Harness on project_dir
+
+run_lock.claim(project_dir)      # hold until this process exits
 ```
 
 ---
@@ -304,6 +323,7 @@ print(result.cache_read_tokens)  # int | None — prompt-cache reads
 print(result.cost_usd)         # float | None — runtime's figure (API-equivalent on a subscription)
 print(result.session_id)       # str | None
 print(result.timed_out)        # bool
+print(result.turn_limited)     # bool — session used up its turn budget (error_max_turns)
 print(result.tool_calls_observed)  # list[str] (SDK runner only)
 print(result.rate_limit_reset_at)  # datetime | None (set if a subscription cap is hit)
 ```

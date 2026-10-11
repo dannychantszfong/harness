@@ -296,8 +296,11 @@ def test_passing_feature_gets_harness_commit(tmp_path):
     _run_loop(config, generate, [_eval(9, True)])
 
     feature = ProgressTracker(config).load().get_feature("f1")
-    assert feature.base_commit_sha == base
-    assert feature.commit_sha is not None and feature.commit_sha != base
+    # The base is HEAD after Harness committed what was on disk (here only
+    # its own .gitignore entries) — R-01.
+    assert _git(project, "merge-base", "--is-ancestor", base, feature.base_commit_sha) == ""
+    assert "login.py" not in _git(project, "ls-tree", "-r", "--name-only", feature.base_commit_sha)
+    assert feature.commit_sha is not None and feature.commit_sha != feature.base_commit_sha
     assert _git(project, "log", "-1", "--format=%s", feature.commit_sha) == "feat(f1): Login — score 9.0"
     assert "login.py" in _git(project, "show", "--name-only", "--format=", feature.commit_sha)
 

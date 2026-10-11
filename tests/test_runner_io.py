@@ -184,6 +184,7 @@ def test_subprocess_is_error_result_is_a_failure(cfg, tmp_path, monkeypatch):
     assert result.success is False
     assert "error_max_turns" in result.error
     assert result.rate_limited is False
+    assert result.turn_limited is True  # recorded like a timeout, not a runner outage
 
 
 def test_subprocess_json_usage_limit_is_rate_limited(cfg, tmp_path, monkeypatch):

@@ -140,7 +140,7 @@ Five agent classes, each with one responsibility:
 
 `Feature` and `ProjectProgress` Pydantic models + `ProgressTracker` for read/write of `features.json`. The on-disk format is the source of truth — restartable, human-inspectable, the basis for `harness resume`.
 
-**Single-writer assumption.** No file lock today. Safe because feature execution is sequential. A future parallel-feature mode would need an advisory lock here (`fcntl` / `msvcrt`).
+**Single writer.** One Harness process per project is enforced by `harness/run_lock.py` (an OS lock on `.harness/run.lock`, ADR-017). Within the process, feature execution is sequential; a future parallel-feature mode would need its own coordination here.
 
 ### Layer 7 — Context / Session ([harness/context/](../../harness/context/), [harness/session/](../../harness/session/))
 
@@ -163,7 +163,7 @@ OS-specific scheduling for one-shot post-cap resumes:
 |---|---|---|
 | launchd LaunchAgent | macOS | Primary, validated |
 | systemd user service+timer | Linux | Experimental (mocked tests; not live-validated) |
-| Task Scheduler + PowerShell wrapper | Windows | Experimental (mocked tests; not live-validated) |
+| Task Scheduler + PowerShell wrapper | Windows | Supported (validated on a real host, 2026-10-11) |
 
 `backend()` selects automatically based on `platform.system()` + `shutil.which()`. `is_supported()` returns False when no usable backend exists; the orchestrator falls back to printing a manual-resume hint.
 
@@ -183,7 +183,8 @@ The single coordinator. Largest module by far (~700 LOC) because it ties togethe
 - Live config reload at the natural seams (top of the feature loop, top of the GAN inner loop). Field allowlist in `_LIVE_RELOAD_FIELDS`. Identity fields (project_id, output_dir, code_runner, orchestration_mode) are intentionally pinned — changing them mid-run would invalidate the runner instance and progress files.
 - Project-Git sync at init and after each passing feature
 - Role-aware fallback rotation: `_with_role_fallback(role, call)` is the single seam. On `RunnerRateLimitedError` it advances to the next profile in that role's chain. Non-rate-limit failures propagate unchanged (this is intentional — see ADR-011).
-- Auto-resume scheduling when rotation is exhausted and `reset_at` is known
+- Auto-resume scheduling when rotation is exhausted and `reset_at` is known; cancelling a pending job when a run starts
+- Holding the project's run lock for the whole run (`run_lock.hold`, ADR-017)
 
 ### Layer 11 — UI ([harness/ui/spinner.py](../../harness/ui/spinner.py))
 
@@ -191,7 +192,7 @@ The single coordinator. Largest module by far (~700 LOC) because it ties togethe
 
 ### Layer 12 — CLI ([harness/cli.py](../../harness/cli.py))
 
-Click commands: `new`, `resume`, `import`, `run`, `setup`, `runners`, `status`, `plan`, `init`, `animation-theme`. Translates flags into a `HarnessConfig`, hands off to `Orchestrator.run()`. The CLI is intentionally a thin layer — all behavior lives in the modules above.
+Click commands: `new`, `resume`, `import`, `run`, `setup`, `runners`, `status`, `plan`, `init`, `animation-theme`. Translates flags into a `HarnessConfig`, hands off to `Orchestrator.run()`. Commands that run agents install `process_guard` (sessions die with Harness) and claim the project's run lock before writing anything (ADR-017). The CLI is intentionally a thin layer — all behavior lives in the modules above.
 
 ---
 
@@ -230,7 +231,7 @@ Documented here so they're easy to revisit when parallel execution lands:
 | Layer | Shared mutable state | Impact under parallel features |
 |---|---|---|
 | Runners (`profile_env`) | `os.environ` | SDK runner races; subprocess+codex are safe (use `env=` arg) |
-| Persistence (`tracker.save`) | `features.json` | No file lock — two writers will corrupt the file |
+| Persistence (`tracker.save`) | `features.json` | Two *processes* are refused by the run lock (ADR-017); two writers in one process would still race |
 | Orchestrator (`_role_profile_index`, `_role_runner_cache`, `total_tokens`) | Per-instance attributes | Per-process safe; aggregation needed if features run in worker processes |
 | Project git (`subprocess.run(["git", ...])`) | The single project repo's index/HEAD | Two parallel commits will race; needs per-feature worktrees or branch-per-feature |
 | Auto-resume (`auto_resume.schedule`) | One launchd/systemd/Task Scheduler entry per project_id | Designed for a single coordinator; only one writer is correct |

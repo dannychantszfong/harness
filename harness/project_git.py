@@ -35,6 +35,7 @@ PROJECT_GITIGNORE_ENTRIES: tuple[str, ...] = (
     ".auto_resume.sh",
     ".auto_resume.ps1",
     "auto_resume.log",
+    ".harness/run.lock",
 )
 
 
@@ -109,6 +110,30 @@ def is_dirty(project_dir: Path) -> bool:
     return proc.returncode == 0 and bool(proc.stdout.strip())
 
 
+def dirty_paths(project_dir: Path) -> list[str]:
+    """Paths with uncommitted changes, untracked files listed one by one."""
+    proc = _run(
+        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+        cwd=project_dir,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    paths: list[str] = []
+    entries = proc.stdout.split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        status, path = entry[:2], entry[3:]
+        paths.append(path)
+        if "R" in status or "C" in status:
+            i += 1  # the next entry is the rename/copy source
+    return paths
+
+
 def commit_all(project_dir: Path, message: str) -> str | None:
     """`git add -A && git commit -m message` if the tree is dirty.
 
@@ -118,9 +143,80 @@ def commit_all(project_dir: Path, message: str) -> str | None:
     if not is_git_repo(project_dir):
         return None
     if is_dirty(project_dir):
+        absorb_nested_repos(project_dir)
         _run(["git", "add", "-A"], cwd=project_dir)
         _run(["git", "commit", "-m", message], cwd=project_dir, env=_identity_env(project_dir))
     return git_head(project_dir)
+
+
+def nested_repos(project_dir: Path) -> list[str]:
+    """Repositories below the project root that `git add -A` would record as
+    gitlinks: untracked directories with their own .git (git lists those
+    with a trailing slash), and gitlinks already staged — minus real
+    submodules declared in .gitmodules."""
+    others = _run(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=project_dir, check=False)
+    found = [p.rstrip("/") for p in others.stdout.split("\0") if p.endswith("/")]
+    staged = _run(["git", "ls-files", "--stage", "-z"], cwd=project_dir, check=False)
+    for entry in staged.stdout.split("\0"):
+        if entry.startswith("160000 ") and "\t" in entry:
+            found.append(entry.split("\t", 1)[1])
+    submodules = _submodule_paths(project_dir)
+    return sorted({p for p in found if p and p not in submodules})
+
+
+def absorb_nested_repos(project_dir: Path) -> list[tuple[str, str]]:
+    """Turn nested repositories into plain directories before committing.
+
+    Scaffolders (`rails new`, some templates) run `git init` in a
+    subdirectory. `git add -A` then records a gitlink with no .gitmodules
+    (clones break), and `git reset --hard` cannot remove the nested repo.
+    The nested .git is moved — not deleted — into the project's own git
+    directory (<git-dir>/harness/nested-repos/), so its history survives
+    and the files are committed as ordinary files. Returns
+    [(path, "absorbed" | "excluded")]; "excluded" (kept out of git via
+    .git/info/exclude) when the move failed.
+    """
+    results: list[tuple[str, str]] = []
+    paths = nested_repos(project_dir)
+    if not paths:
+        return results
+    store = _git_dir(project_dir) / "harness" / "nested-repos"
+    for rel in paths:
+        _run(["git", "rm", "--cached", "-q", "--ignore-unmatch", "--", rel], cwd=project_dir, check=False)
+        inner = Path(project_dir) / rel / ".git"
+        if inner.exists():
+            store.mkdir(parents=True, exist_ok=True)
+            safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in rel) or "repo"
+            dest = store / safe
+            n = 1
+            while dest.exists():
+                n += 1
+                dest = store / f"{safe}-{n}"
+            try:
+                shutil.move(str(inner), str(dest))
+            except OSError:
+                _append_exclude(project_dir, ["/" + _escape_gitignore(rel) + "/"])
+                results.append((rel, "excluded"))
+                continue
+        results.append((rel, "absorbed"))
+    return results
+
+
+def _submodule_paths(project_dir: Path) -> set[str]:
+    if not (Path(project_dir) / ".gitmodules").is_file():
+        return set()
+    proc = _run(
+        ["git", "config", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
+        cwd=project_dir,
+        check=False,
+    )
+    return {line.split(" ", 1)[1].strip() for line in proc.stdout.splitlines() if " " in line}
+
+
+def _git_dir(project_dir: Path) -> Path:
+    rel = _run(["git", "rev-parse", "--git-dir"], cwd=project_dir).stdout.strip()
+    path = Path(rel)
+    return path if path.is_absolute() else Path(project_dir) / path
 
 
 def commit_paths(project_dir: Path, paths: list[str], message: str) -> str | None:
@@ -187,19 +283,26 @@ def keep_excluded(project_dir: Path, paths: list[str]) -> list[str]:
             added.append(path)
     if not added:
         return []
+    _append_exclude(
+        project_dir,
+        ["/" + _escape_gitignore(p) for p in added],
+        comment="Left behind by an exhausted Harness attempt",
+    )
+    return added
+
+
+def _append_exclude(project_dir: Path, patterns: list[str], comment: str = "Added by Harness") -> None:
+    """Append patterns to .git/info/exclude (local; never committed)."""
     exclude_rel = _run(
         ["git", "rev-parse", "--git-path", "info/exclude"], cwd=project_dir
     ).stdout.strip()
     exclude = Path(project_dir) / exclude_rel if not Path(exclude_rel).is_absolute() else Path(exclude_rel)
     exclude.parent.mkdir(parents=True, exist_ok=True)
     existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    lines = ["# Left behind by an exhausted Harness attempt"]
-    lines += ["/" + _escape_gitignore(p) for p in added]
     with open(exclude, "a", encoding="utf-8") as fh:
         if existing and not existing.endswith("\n"):
             fh.write("\n")
-        fh.write("\n".join(lines) + "\n")
-    return added
+        fh.write("\n".join([f"# {comment}", *patterns]) + "\n")
 
 
 def _escape_gitignore(path: str) -> str:

@@ -18,7 +18,31 @@ _RUNNER_CHOICES = ["subprocess", "sdk", "codex"]
 # initializer and generator commit and project_git pushes. Secret-looking
 # values must therefore be env references, never literals (US-21/US-23).
 _ENV_REFERENCE_RE = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$")
-_SECRET_KEY_RE = re.compile(r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD)$", re.IGNORECASE)
+# Names that usually hold a secret. A heuristic (README "Safety"): it
+# catches API_KEY, APIKEY, GHTOKEN, DB_PASS, AUTH, CREDENTIALS, … but not
+# every name a secret can hide under.
+_SECRET_KEY_RE = re.compile(
+    r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?"
+    r"|(?:^|_)AUTH(?:ORIZATION)?|(?:^|_)PASS)$",
+    re.IGNORECASE,
+)
+# Well-known credential formats, wherever they appear in a value or an arg.
+_SECRET_VALUE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"sk-[A-Za-z0-9_-]{16,}"            # OpenAI / Anthropic / OpenRouter
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"      # GitHub tokens
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}"    # Slack
+    r"|AKIA[0-9A-Z]{16}"                # AWS access key id
+    r"|AIza[0-9A-Za-z_-]{35}"           # Google API key
+    r")"
+)
+# `"API_KEY": "literal"`, `api_key=literal` inside an arg (--settings JSON,
+# codex `-c provider.api_key=…`). `$VAR` values are references, not secrets.
+_INLINE_SECRET_RE = re.compile(
+    r"(?:api[_-]?key|token|secret|password|passwd)[\"']?\s*[:=]\s*[\"']?(?!\$)[^\s\"',}]{8,}",
+    re.IGNORECASE,
+)
 
 
 def is_env_reference(value: str) -> bool:
@@ -27,6 +51,19 @@ def is_env_reference(value: str) -> bool:
 
 def looks_like_secret_key(name: str) -> bool:
     return bool(_SECRET_KEY_RE.search(name))
+
+
+def _url_has_credentials(value: str) -> bool:
+    """scheme://user:password@host, or https://token@host."""
+    if "://" not in value or "@" not in value:
+        return False
+    try:
+        parsed = urlsplit(value.strip())
+    except ValueError:
+        return False
+    if parsed.password:
+        return True
+    return parsed.scheme in ("http", "https") and bool(parsed.username)
 
 
 def _literal_secret_error(where: str, example: str) -> ValueError:
@@ -38,11 +75,24 @@ def _literal_secret_error(where: str, example: str) -> ValueError:
 
 def check_env_secrets(env: dict[str, str], where: str) -> None:
     for key, value in (env or {}).items():
-        if looks_like_secret_key(key) and value and not is_env_reference(str(value)):
+        text = str(value or "").strip()
+        if not text or is_env_reference(text):
+            continue
+        numeric_or_flag = text.isdigit() or text.lower() in ("true", "false", "0", "1")
+        if (
+            (looks_like_secret_key(key) and not numeric_or_flag)
+            or _SECRET_VALUE_RE.search(text)
+            or _url_has_credentials(text)
+        ):
             raise _literal_secret_error(f"{where}[{key!r}]", key.upper())
 
 
-_SECRET_FLAG_RE = re.compile(r"^--?[\w-]*(?:key|token|secret|password)[\w-]*$", re.IGNORECASE)
+# The secret word must be a whole word: --api-key, --apikey, --auth-token,
+# but not --max-tokens or --monkey-patch.
+_SECRET_FLAG_RE = re.compile(
+    r"^--?[\w-]*(?:api[-_]?key|(?<![a-z])key|token|secret|password|passwd)(?![a-z])[\w-]*$",
+    re.IGNORECASE,
+)
 
 
 def check_arg_secrets(args: list[str], where: str) -> None:
@@ -52,14 +102,21 @@ def check_arg_secrets(args: list[str], where: str) -> None:
     the fix is to move the secret into an env var.
     """
     for i, arg in enumerate(args or []):
-        flag, eq, inline = str(arg).partition("=")
-        if not _SECRET_FLAG_RE.match(flag):
-            continue
-        value = inline if eq else (str(args[i + 1]) if i + 1 < len(args) else "")
-        if value and not value.startswith("-"):
+        text = str(arg)
+        flag, eq, inline = text.partition("=")
+        if _SECRET_FLAG_RE.match(flag):
+            value = inline if eq else (str(args[i + 1]) if i + 1 < len(args) else "")
+            if value and not value.startswith("-"):
+                raise ValueError(
+                    f"{where} passes a secret on the command line ({flag} …). Put it in an "
+                    f"environment variable instead — {CONFIG_FILENAME} is committed to the project repo."
+                )
+        # Secrets carried inside an argument: --settings '{"env": {...}}',
+        # codex `-c model_providers.x.api_key=…`, a token-shaped literal.
+        if _SECRET_VALUE_RE.search(text) or _INLINE_SECRET_RE.search(text) or _url_has_credentials(text):
             raise ValueError(
-                f"{where} passes a secret on the command line ({flag} …). Put it in an "
-                f"environment variable instead — {CONFIG_FILENAME} is committed to the project repo."
+                f"{where} contains what looks like a literal credential (argument {i + 1}). Put it "
+                f"in an environment variable instead — {CONFIG_FILENAME} is committed to the project repo."
             )
 
 

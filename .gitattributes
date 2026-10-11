@@ -1,0 +1,2 @@
+# LF everywhere, so Windows checkouts do not show every file as modified.
+* text=auto eol=lf

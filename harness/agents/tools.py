@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from harness.runners.base import kill_process_tree
+from harness.runners.base import child_popen_kwargs, kill_process_tree
 
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
@@ -193,6 +193,8 @@ class ProjectTools:
         for file in files:
             if glob and not file.match(glob):
                 continue
+            if not self._inside(file):
+                continue  # a symlink pointing out of the project
             try:
                 if file.stat().st_size > _MAX_SEARCH_FILE_BYTES:
                     continue
@@ -233,18 +235,28 @@ class ProjectTools:
                 )
             for arg in argv[2:]:
                 bare = arg.strip("\"'")
-                if bare.startswith("-O") or bare.startswith(_GIT_FORBIDDEN_LONG_OPTIONS):
+                if _forbidden_git_option(bare):
                     raise ToolError(f"git option {bare.split('=')[0]} is not allowed")
             return [argv[0], argv[1], *_GIT_SAFETY_ARGS.get(argv[1], []), *argv[2:]]
         return None  # an exact allow-listed command line, run as written
 
     def _resolve(self, path: str) -> Path:
         candidate = (self.root / (path or ".")).resolve()
-        if candidate != self.root and self.root not in candidate.parents:
+        if not self._inside(candidate):
             raise ToolError(f"path is outside the project: {path}")
         return candidate
 
+    def _inside(self, path: Path) -> bool:
+        """Whether path, with symlinks resolved, is within the project."""
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError):
+            return False
+        return resolved == self.root or self.root in resolved.parents
+
     def _walk(self, base: Path):
+        # os.walk does not descend into symlinked directories; files that are
+        # symlinks are yielded and checked by the caller (_inside).
         for current, dirs, files in os.walk(base):
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
             for f in files:
@@ -253,6 +265,29 @@ class ProjectTools:
 
 class ToolError(Exception):
     pass
+
+
+# Real git options that happen to be prefixes of forbidden ones.
+_GIT_EXACT_SAFE_LONG_OPTIONS = frozenset({"--text"})
+
+
+def _forbidden_git_option(arg: str) -> bool:
+    """True for git options that write files, read outside the repo or run
+    programs — including the forms git also accepts:
+    - short-option bundles: `-pO<file>` is `-p -O<file>`;
+    - unambiguous abbreviations of long options: `--outp=<file>`, `--textc`.
+    """
+    if arg == "--" or not arg.startswith("-"):
+        return False
+    if not arg.startswith("--"):
+        return "O" in arg[1:]
+    name = arg.split("=", 1)[0]
+    if name in _GIT_EXACT_SAFE_LONG_OPTIONS:
+        return False
+    return any(
+        name.startswith(forbidden) or (len(name) > 3 and forbidden.startswith(name))
+        for forbidden in _GIT_FORBIDDEN_LONG_OPTIONS
+    )
 
 
 def _split(command: str) -> list[str]:
@@ -286,9 +321,7 @@ def _run_bounded(command: str, cwd: Path, timeout: int) -> str:
     Output goes to a temp file rather than a pipe: a dev server started by
     the startup script would otherwise hold the pipe open after the kill.
     """
-    popen_kwargs: dict[str, Any] = {}
-    if os.name != "nt":
-        popen_kwargs["start_new_session"] = True  # killpg on timeout
+    popen_kwargs = child_popen_kwargs()  # own process group: killpg on timeout
     args = _popen_args(command)
     with tempfile.TemporaryFile() as out:
         try:

@@ -287,7 +287,7 @@ def test_sdk_max_turns_with_429_chatter_is_not_a_cap(tmp_path, monkeypatch):
     sdk.query = query
     monkeypatch.setitem(sys.modules, "claude_code_sdk", sdk)
     result = SDKRunner(HarnessConfig(project_name="p", brief="b")).implement("p", cwd=str(tmp_path))
-    assert result.success is False and result.rate_limited is False
+    assert result.success is False and result.rate_limited is False and result.turn_limited
 
 
 # ── 9. a dead evaluator stops the run instead of burning budgets ────────────

@@ -18,8 +18,10 @@ from harness.agents.base import BaseAgent
 from harness.progress.models import Feature, ProjectProgress, SprintContract
 from harness.runners.base import (
     CodeRunner,
+    RunnerFailedError,
     RunnerRateLimitedError,
     RunnerTimeoutError,
+    RunnerTurnLimitError,
     RunResult,
 )
 
@@ -275,6 +277,10 @@ class GeneratorAgent(BaseAgent):
                     timeout_seconds=self.config.runner_timeout_seconds,
                     raw_message=result.error or "",
                 )
-            return f"[Runner error] {result.error}\n\nPartial output:\n{result.output}"
+            if result.turn_limited:
+                raise RunnerTurnLimitError(raw_message=result.error or "")
+            # Anything else is the runner failing, not the agent: grading it
+            # would spend the feature's budget on a broken runner (R-05).
+            raise RunnerFailedError(raw_message=result.error or "runner session failed")
 
         return result.output or "(no output from runner)"

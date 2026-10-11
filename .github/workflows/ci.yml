@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # main, plus release branches such as harness-1.0, so a pushed branch is
+    # tested before its PR exists.
+    branches: [main, "harness-*"]
   pull_request:
 
 permissions:
