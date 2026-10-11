@@ -84,5 +84,5 @@ Follow-up (owner's replay of R-04): `_handle_exhausted` recorded the git-ignored
 
 1. Suite 402 passed, 6 skipped; the same with `claude`/`codex`/`gh` removed from `PATH`; packaging (wheel → clean venv → `harness --help`) 3 passed. `ruff check .` clean.
 2. `v1.0-a` and `v1.0` moved to the review-pass-2 commit (local tags only).
-3. Push — left to the owner.
+3. Pushed `harness-1.0` with tags `v1.0-a`…`v1.0`; CI run 38177982169 green on all four jobs (DoD 6).
 4. DoD 7 — left to the owner.

@@ -359,7 +359,7 @@ Branch `harness-1.0`, one commit and tag per phase: `v1.0-b`, `v1.0-c`, `v1.0-d`
 | 3 | ADR-013…ADR-016 recorded | done |
 | 4 | `pip install .` into a clean venv → `harness --help` | done locally (wheel → fresh venv); also a CI step |
 | 5 | `pytest` passes with no `claude`/`codex`/`gh` on PATH | done locally; CI removes them before testing |
-| 6 | CI green on 3.11/3.12, Ubuntu/macOS | workflow added; not run yet (branch not pushed) |
+| 6 | CI green on 3.11/3.12, Ubuntu/macOS | done — run 38177982169 on `59a4d80`: all four jobs green (Ubuntu 405 passed / 3 skipped, macOS 406 passed / 2 skipped, packaging 3 passed on each) |
 | 7 | Manual end-to-end on a clean machine | **not done** — needs real agent runs on a subscription; the scheduled-resume part was exercised (Windows) |
 | 8 | README claims match default behaviour | done |
 | 9 | Success metrics measurable | done: reset/handoff test, per-feature cost in `harness status`, runner-error tests |
