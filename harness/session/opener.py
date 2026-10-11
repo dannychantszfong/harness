@@ -33,7 +33,7 @@ class SessionOpener:
         blocks: list[str] = []
 
         blocks.append(f"# Session {progress.session_count} — {progress.project_name}")
-        blocks.append(f"")
+        blocks.append("")
         blocks.append(f"**Brief:** {progress.brief}")
         blocks.append(
             f"**Progress:** {progress.completion_pct}% "

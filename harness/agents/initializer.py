@@ -12,10 +12,9 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from harness.timeutil import utcnow
 
 from harness.agents.base import BaseAgent
-from harness.config import HarnessConfig
 from harness.progress.models import Feature, FeatureStatus, ProjectProgress
 from harness.progress.tracker import ProgressTracker
 
@@ -131,8 +130,8 @@ class InitializerAgent(BaseAgent):
             spec=spec_text,
             features=features,
             session_count=1,
-            created_at=datetime.utcnow(),
-            last_updated=datetime.utcnow(),
+            created_at=utcnow(),
+            last_updated=utcnow(),
         )
         tracker.save(progress)
 
@@ -297,8 +296,8 @@ class InitializerAgent(BaseAgent):
             spec=self.config.spec_path.read_text() if self.config.spec_path.exists() else None,
             features=features,
             session_count=1,
-            created_at=datetime.utcnow(),
-            last_updated=datetime.utcnow(),
+            created_at=utcnow(),
+            last_updated=utcnow(),
         )
         tracker.save(progress)
         print(

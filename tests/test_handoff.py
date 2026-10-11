@@ -1,8 +1,7 @@
 """Tests for HandoffDocument and ContextReset."""
 
-import tempfile
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -37,7 +36,7 @@ class TestHandoffDocument:
         doc = HandoffDocument(
             project_name="proj",
             session_number=1,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             what_was_done="Implemented auth",
             current_state="Auth passing, dashboard next",
             next_action="Implement dashboard",
@@ -60,7 +59,7 @@ class TestHandoffDocument:
             doc = HandoffDocument(
                 project_name="proj",
                 session_number=i,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 what_was_done=f"Session {i}",
                 current_state="running",
                 next_action="continue",
@@ -74,7 +73,7 @@ class TestHandoffDocument:
         doc = HandoffDocument(
             project_name="proj",
             session_number=2,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             what_was_done="Did stuff",
             current_state="Good state",
             next_action="Do more stuff",
@@ -113,11 +112,10 @@ class TestContextReset:
         assert handoff.session_number == 2
 
     def test_format_session_preamble_with_handoff(self, tmp_config, sample_progress):
-        reset = ContextReset(tmp_config)
         handoff = HandoffDocument(
             project_name="test",
             session_number=3,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             what_was_done="previous work",
             current_state="state",
             next_action="next thing",

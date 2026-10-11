@@ -8,7 +8,7 @@ A reset produces a HandoffDocument so the new session has full situational
 awareness without inheriting any of the old conversation.
 """
 
-from datetime import datetime
+from harness.timeutil import utcnow
 from pathlib import Path
 
 from harness.context.handoff import HandoffDocument
@@ -38,7 +38,7 @@ class ContextReset:
         handoff = HandoffDocument(
             project_name=progress.project_name,
             session_number=session_number,
-            completed_at=datetime.utcnow(),
+            completed_at=utcnow(),
             what_was_done=what_was_done,
             current_state=current_state,
             next_action=next_action,
@@ -82,7 +82,7 @@ class ContextReset:
         if next_feature:
             blocks += [
                 "",
-                f"## Next target feature",
+                "## Next target feature",
                 f"**{next_feature.name}** (id: `{next_feature.id}`)",
                 next_feature.description,
             ]

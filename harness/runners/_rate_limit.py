@@ -4,7 +4,8 @@ Two signals share this module:
 
   • `looks_rate_limited(text)` — broad heuristic. Used to flag a runner
     failure as rate-limit-class so the orchestrator rotates to the next
-    profile in the role's chain. Cheap, conservative.
+    profile in the role's chain. Cheap, conservative; feed it
+    `failure_haystack(stdout, stderr)` rather than raw output.
 
   • `parse_reset_time(text)` — strict parser for the "You've hit your
     limit · resets 9:30pm (Europe/London)" pattern Claude Code prints
@@ -37,20 +38,40 @@ _RESET_PARSE_TRIGGERS: tuple[str, ...] = (
 )
 
 # "Broad" hints — anything that smells rate-limited regardless of whether
-# a reset time is present. Used by sdk/codex runners to set the boolean
-# flag and trigger profile rotation.
-RATE_LIMIT_HINTS: tuple[str, ...] = _RESET_PARSE_TRIGGERS + (
-    "rate limit",
-    "rate-limit",
-    "rate_limit",
-    "rate_limited",
-    "usage limit",
-    "usage cap",
-    "quota",
-    "too many requests",
-    "429",
-    "request was throttled",
+# a reset time is present. Used to set the boolean flag and trigger profile
+# rotation. Word boundaries keep "429" from matching inside port numbers or
+# ids, and "quota" only counts next to "exceeded"/"limit" (ADR-011:
+# rotation must stay conservative).
+RATE_LIMIT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"you(?:'ve| have) hit your (?:usage )?limit",
+        # rate limit / rate-limited / rate_limit_error, but not "RateLimiter"
+        r"\brate[\s_-]?limit(?:ed|s|_error|_exceeded)?\b",
+        r"\busage (?:limit|cap)\b",
+        r"\bquota\b.{0,40}\b(?:exceeded|limit)",
+        r"\b(?:exceeded|limit)\b.{0,40}\bquota\b",
+        r"\btoo many requests\b",
+        r"\b429\b",
+        r"\brequest was throttled\b",
+    )
 )
+
+# How much of stdout is considered. Agents print their whole transcript to
+# stdout; only the tail is where a CLI reports why it stopped.
+STDOUT_TAIL_LINES = 20
+
+
+def failure_haystack(stdout: str | None, stderr: str | None, *extra: str | None) -> str:
+    """Text a failed run is classified on: extra messages + stderr + stdout tail.
+
+    `extra` carries structured error text the runner already extracted
+    (e.g. a JSON `result` with is_error=true), which is the most precise
+    signal and therefore goes first.
+    """
+    tail = "\n".join((stdout or "").strip().splitlines()[-STDOUT_TAIL_LINES:])
+    parts = [*(e for e in extra if e), stderr or "", tail]
+    return "\n".join(p for p in parts if p)
 
 
 def looks_rate_limited(text: str) -> bool:
@@ -58,12 +79,19 @@ def looks_rate_limited(text: str) -> bool:
 
     Conservative on purpose: we only want this to fire when rotating
     providers is the right move. Bare 4xx errors that aren't 429 don't
-    qualify.
+    qualify. Callers should pass `failure_haystack(...)`, not a whole
+    transcript — a generator implementing a rate limiter must not look
+    capped.
     """
     if not text:
         return False
-    lowered = text.lower()
-    return any(hint in lowered for hint in RATE_LIMIT_HINTS)
+    return any(p.search(text) for p in RATE_LIMIT_PATTERNS)
+
+
+def classify_failure(text: str) -> tuple[Optional[datetime], bool]:
+    """(reset_at, rate_limited) for a failed run's haystack."""
+    reset_at = parse_reset_time(text)
+    return reset_at, reset_at is not None or looks_rate_limited(text)
 
 
 def parse_reset_time(

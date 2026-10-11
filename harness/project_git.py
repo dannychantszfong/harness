@@ -28,6 +28,44 @@ from pathlib import Path
 from harness.config import HarnessConfig
 
 
+# Runtime files Harness writes into the project directory that must never be
+# committed (auto_resume wrappers carry absolute paths; the log is noise).
+PROJECT_GITIGNORE_ENTRIES: tuple[str, ...] = (
+    ".auto_resume.sh",
+    ".auto_resume.ps1",
+    "auto_resume.log",
+)
+
+
+def ensure_project_gitignore(project_dir: Path) -> bool:
+    """Append missing Harness runtime entries to <project>/.gitignore.
+
+    Idempotent; existing content is kept. Returns True if the file changed.
+    """
+    path = Path(project_dir) / ".gitignore"
+    try:
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    except OSError:
+        return False
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [entry for entry in PROJECT_GITIGNORE_ENTRIES if entry not in present]
+    if not missing:
+        return False
+    block = ""
+    if existing and not existing.endswith("\n"):
+        block += "\n"
+    if "# Harness runtime files" not in present:
+        block += "# Harness runtime files\n"
+    block += "\n".join(missing) + "\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(block)
+    except OSError:
+        return False
+    return True
+
+
 class ProjectGitConfigurationError(Exception):
     """Raised when the host's GitHub-sync prerequisites aren't satisfied.
 

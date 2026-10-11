@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
-from datetime import datetime
+from typing import Optional
+from harness.timeutil import UTCDateTime, utcnow
 from enum import Enum
 
 
@@ -20,7 +20,10 @@ class EvaluationResult(BaseModel):
     feedback: str
     passed: bool
     iteration: int
-    evaluated_at: datetime = Field(default_factory=datetime.utcnow)
+    evaluated_at: UTCDateTime = Field(default_factory=utcnow)
+    # Set when the iteration failed before/without a real grade, e.g.
+    # "generator_timeout". Such iterations still count against the budget.
+    failure_reason: Optional[str] = None
 
 
 class SprintContract(BaseModel):
@@ -28,7 +31,7 @@ class SprintContract(BaseModel):
     feature_id: str
     acceptance_criteria: list[str]
     out_of_scope: list[str]
-    agreed_at: datetime = Field(default_factory=datetime.utcnow)
+    agreed_at: UTCDateTime = Field(default_factory=utcnow)
 
 
 class Feature(BaseModel):
@@ -40,8 +43,8 @@ class Feature(BaseModel):
     sprint_contract: Optional[SprintContract] = None
     evaluation_history: list[EvaluationResult] = Field(default_factory=list)
     implementation_notes: Optional[str] = None
-    implemented_at: Optional[datetime] = None
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    implemented_at: Optional[UTCDateTime] = None
+    last_updated: UTCDateTime = Field(default_factory=utcnow)
 
     @property
     def latest_evaluation(self) -> Optional[EvaluationResult]:
@@ -63,8 +66,8 @@ class ProjectProgress(BaseModel):
     total_cost_usd: float = 0.0
     total_tokens_used: int = 0
     session_count: int = 0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    created_at: UTCDateTime = Field(default_factory=utcnow)
+    last_updated: UTCDateTime = Field(default_factory=utcnow)
 
     @property
     def pending_features(self) -> list[Feature]:

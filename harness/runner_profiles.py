@@ -143,7 +143,14 @@ def config_for_profile(config: HarnessConfig, profile: RunnerProfile) -> Harness
     """
     data = config.model_dump(mode="python")
     data["code_runner"] = profile.runner
-    data["code_runner_model"] = profile.model if profile.model is not None else config.code_runner_model
+    if profile.model is not None:
+        data["code_runner_model"] = profile.model
+    elif profile.runner == config.code_runner:
+        data["code_runner_model"] = config.code_runner_model
+    else:
+        # A Claude alias such as "opus" means nothing to Codex (and vice
+        # versa): a profile on a different runtime uses that runtime's default.
+        data["code_runner_model"] = None
     data["code_runner_extra_args"] = list(profile.extra_args)
 
     merged_env = dict(config.active_runner_env or {})

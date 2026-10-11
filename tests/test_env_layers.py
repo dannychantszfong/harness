@@ -16,7 +16,6 @@ old configs loading; new configs serialize under the new name.
 
 from pathlib import Path
 
-import pytest
 
 from harness.config import HarnessConfig, RunnerProfile
 from harness.runner_profiles import config_for_profile
@@ -54,9 +53,9 @@ def test_old_field_name_still_loads(tmp_path):
         "output_dir": str(tmp_path),
         "orchestration_mode": "runner",
         "code_runner": "subprocess",
-        "code_runner_env": {"OLD_NAME_KEY": "still-here"},
+        "code_runner_env": {"OLD_NAME_VAR": "still-here"},
     })
-    assert cfg.active_runner_env == {"OLD_NAME_KEY": "still-here"}
+    assert cfg.active_runner_env == {"OLD_NAME_VAR": "still-here"}
 
 
 def test_serialization_uses_new_name(tmp_path):

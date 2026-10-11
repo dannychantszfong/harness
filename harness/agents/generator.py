@@ -15,7 +15,12 @@ from typing import Optional
 
 from harness.agents.base import BaseAgent
 from harness.progress.models import Feature, ProjectProgress, SprintContract
-from harness.runners.base import CodeRunner, RunnerRateLimitedError, RunResult
+from harness.runners.base import (
+    CodeRunner,
+    RunnerRateLimitedError,
+    RunnerTimeoutError,
+    RunResult,
+)
 
 _CONTRACT_SYSTEM = """You are reviewing a sprint contract before implementation begins.
 Confirm you understand the acceptance criteria and flag anything ambiguous.
@@ -153,7 +158,10 @@ class GeneratorAgent(BaseAgent):
         result: RunResult = self.runner.implement(
             prompt=prompt,
             cwd=str(self.config.output_path),
+            timeout_seconds=self._runner_timeout(),
         )
+        # Tokens were spent even when the session failed.
+        self.usage.add_run_result(result)
 
         if not result.success:
             if result.rate_limited or result.rate_limit_reset_at is not None:
@@ -161,12 +169,13 @@ class GeneratorAgent(BaseAgent):
                     reset_at=result.rate_limit_reset_at,
                     raw_message=result.error or "",
                 )
+            if result.timed_out:
+                # Not a self-evaluation: the orchestrator records a failed
+                # iteration instead of asking the evaluator to grade it.
+                raise RunnerTimeoutError(
+                    timeout_seconds=self.config.runner_timeout_seconds,
+                    raw_message=result.error or "",
+                )
             return f"[Runner error] {result.error}\n\nPartial output:\n{result.output}"
-
-        # Accumulate token usage when the runner provides it
-        if result.input_tokens:
-            self.usage.input_tokens += result.input_tokens
-        if result.output_tokens:
-            self.usage.output_tokens += result.output_tokens
 
         return result.output or "(no output from runner)"

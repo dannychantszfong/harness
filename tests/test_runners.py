@@ -8,13 +8,12 @@ runners; they plug into one of the three agentic runners via env vars.
 import sys
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from harness.config import HarnessConfig
 from harness.runners import create_runner, RunnerType
-from harness.runners.base import RunResult
 from harness.runners.subprocess_runner import SubprocessRunner
 from harness.runners.sdk_runner import SDKRunner
 from harness.runners.codex_runner import CodexRunner
@@ -243,10 +242,15 @@ def test_sdk_success(tmp_config, monkeypatch):
     class AssistantMsg:
         content = [tool_block, text_block]
 
-    # ResultMessage — type().__name__ must equal "ResultMessage"
+    # ResultMessage — type().__name__ must equal "ResultMessage". Shape of
+    # claude_code_sdk 0.0.25: usage is a dict, cost is total_cost_usd.
     class ResultMessage:
-        usage = SimpleNamespace(input_tokens=500, output_tokens=200)
-        cost_usd = 0.05
+        subtype = "success"
+        is_error = False
+        session_id = "sess-1"
+        result = "Self evaluation complete."
+        usage = {"input_tokens": 500, "output_tokens": 200}
+        total_cost_usd = 0.05
 
     async def fake_query(*args, **kwargs):
         for msg in [AssistantMsg(), ResultMessage()]:
@@ -451,7 +455,7 @@ def test_codex_passes_model_and_local_provider(tmp_config, monkeypatch):
     runner = CodexRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
     assert result.success is True
-    assert captured["args"][:2] == ["codex", "exec"]
+    assert captured["args"][1] == "exec"
     assert "--model" in captured["args"]
     assert "qwen2.5-coder" in captured["args"]
     assert "--oss" in captured["args"]

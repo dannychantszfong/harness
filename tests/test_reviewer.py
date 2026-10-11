@@ -1,6 +1,5 @@
 """Tests for ReviewerAgent and the orchestrator's review-only path."""
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -11,7 +10,6 @@ from harness.agents.reviewer import ReviewerAgent
 from harness.orchestrator import Orchestrator
 from harness.runners.base import PreflightResult, RunnerType
 from harness.progress.models import Feature, FeatureStatus, ProjectProgress
-from harness.progress.tracker import ProgressTracker
 
 
 def _make_runner_config(tmp_path: Path) -> HarnessConfig:
@@ -138,9 +136,18 @@ def test_orchestrator_review_only_skips_init_plan_loop(tmp_path, monkeypatch):
 
     calls = {"init": False, "plan": False, "loop": False, "review": False}
 
-    def fail_init(self): calls["init"] = True; raise AssertionError("init called")
-    def fail_plan(self, *a, **k): calls["plan"] = True; raise AssertionError("plan called")
-    def fail_loop(self, *a, **k): calls["loop"] = True; raise AssertionError("loop called")
+    def fail_init(self):
+        calls["init"] = True
+        raise AssertionError("init called")
+
+    def fail_plan(self, *a, **k):
+        calls["plan"] = True
+        raise AssertionError("plan called")
+
+    def fail_loop(self, *a, **k):
+        calls["loop"] = True
+        raise AssertionError("loop called")
+
 
     monkeypatch.setattr(Orchestrator, "_initialize", fail_init)
     monkeypatch.setattr(Orchestrator, "_plan", fail_plan)

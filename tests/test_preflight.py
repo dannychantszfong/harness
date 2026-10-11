@@ -4,12 +4,12 @@ External tools (`gh`, `claude`, `codex`) are mocked via `shutil.which`
 and `subprocess.run`. Auto-install branches use lambdas, never shell out.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from click.testing import CliRunner
 
-from cli import main
+from harness.cli import main
 from harness import preflight
 
 

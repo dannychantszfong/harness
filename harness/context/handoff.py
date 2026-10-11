@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 import json
 
+from harness.timeutil import parse_utc
+
 
 @dataclass
 class HandoffDocument:
@@ -79,5 +81,5 @@ class HandoffDocument:
         if not handoffs:
             return None
         data = json.loads(handoffs[-1].read_text())
-        data["completed_at"] = datetime.fromisoformat(data["completed_at"])
+        data["completed_at"] = parse_utc(data["completed_at"])
         return cls(**data)

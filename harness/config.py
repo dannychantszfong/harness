@@ -1,7 +1,8 @@
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from typing import Literal, Optional
 import json
 import platform
+import re
 import uuid
 import yaml
 from pathlib import Path
@@ -11,6 +12,33 @@ CONFIG_FILENAME = "harness_config.json"
 # Import here to avoid circular; config only stores the string value.
 # Runners are resolved at runtime by create_runner().
 _RUNNER_CHOICES = ["subprocess", "sdk", "codex"]
+
+# harness_config.json lives in the output project's repo, which the
+# initializer and generator commit and project_git pushes. Secret-looking
+# values must therefore be env references, never literals (US-21/US-23).
+_ENV_REFERENCE_RE = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$")
+_SECRET_KEY_RE = re.compile(r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD)$", re.IGNORECASE)
+
+
+def is_env_reference(value: str) -> bool:
+    return bool(_ENV_REFERENCE_RE.match(value.strip()))
+
+
+def looks_like_secret_key(name: str) -> bool:
+    return bool(_SECRET_KEY_RE.search(name))
+
+
+def _literal_secret_error(where: str, example: str) -> ValueError:
+    return ValueError(
+        f"{where} holds a literal secret. Use an environment reference such as "
+        f'"${example}" instead — {CONFIG_FILENAME} is committed to the project repo.'
+    )
+
+
+def check_env_secrets(env: dict[str, str], where: str) -> None:
+    for key, value in (env or {}).items():
+        if looks_like_secret_key(key) and value and not is_env_reference(str(value)):
+            raise _literal_secret_error(f"{where}[{key!r}]", key.upper())
 
 
 class EvaluatorWeights(BaseModel):
@@ -45,6 +73,12 @@ class RunnerProfile(BaseModel):
     codex_local_provider: Optional[Literal["lmstudio", "ollama"]] = None
     enabled: bool = True
 
+    @field_validator("env")
+    @classmethod
+    def _env_secrets_are_references(cls, env: dict[str, str]) -> dict[str, str]:
+        check_env_secrets(env, "runner profile env")
+        return env
+
 
 class HarnessConfig(BaseModel):
     project_name: str
@@ -59,6 +93,15 @@ class HarnessConfig(BaseModel):
     # Context management
     # Resets outperform compaction for Opus 4.5+; keep threshold conservative.
     context_reset_threshold_tokens: int = 150_000
+
+    # Runner session limits. A single feature implementation routinely takes
+    # longer than 10 minutes, so the default is 30. planner/evaluator
+    # sessions may override it (None → runner_timeout_seconds).
+    runner_timeout_seconds: int = Field(default=1800, ge=60)
+    planner_timeout_seconds: Optional[int] = Field(default=None, ge=60)
+    evaluator_timeout_seconds: Optional[int] = Field(default=None, ge=60)
+    # max_turns passed to the Claude Code SDK (sdk runner only).
+    sdk_max_turns: int = Field(default=100, ge=1)
 
     # Generator / evaluator loop
     max_iterations_per_feature: int = 15
@@ -196,10 +239,33 @@ class HarnessConfig(BaseModel):
     #                          to route Claude Code through OpenRouter.
     # The harness does NOT auto-export these to the subprocess env — set them
     # in your shell or use a tool like direnv. The fields exist so you can
-    # persist what a project expects in harness_config.json as documentation.
+    # persist what a project expects in harness_config.json as documentation,
+    # which is why they must be env references ("$OPENAI_API_KEY").
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
+
+    @field_validator("openai_api_key", "gemini_api_key", "openrouter_api_key")
+    @classmethod
+    def _api_keys_are_references(cls, value: Optional[str], info) -> Optional[str]:
+        if value and not is_env_reference(value):
+            raise _literal_secret_error(info.field_name, info.field_name.upper())
+        return value
+
+    @model_validator(mode="after")
+    def _runner_env_secrets_are_references(self) -> "HarnessConfig":
+        check_env_secrets(self.active_runner_env, "active_runner_env")
+        return self
+
+    def check_secrets(self) -> None:
+        """Re-run the literal-secret checks (fields may be assigned after load)."""
+        for name in ("openai_api_key", "gemini_api_key", "openrouter_api_key"):
+            value = getattr(self, name)
+            if value and not is_env_reference(value):
+                raise _literal_secret_error(name, name.upper())
+        check_env_secrets(self.active_runner_env, "active_runner_env")
+        for profile in self.runner_profiles:
+            check_env_secrets(profile.env, f"runner profile {profile.name!r} env")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "HarnessConfig":
@@ -219,6 +285,7 @@ class HarnessConfig(BaseModel):
     def save_file(self, path: str | Path) -> None:
         """Serialize config to JSON by default, YAML only for .yaml/.yml paths."""
         path = Path(path)
+        self.check_secrets()
         data = self.model_dump(mode="json")
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.suffix.lower() == ".json":

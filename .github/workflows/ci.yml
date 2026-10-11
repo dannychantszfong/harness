@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The suite must not depend on any coding-agent or GitHub CLI.
+      # Hosted runners ship `gh`, so remove it (and anything else) first.
+      - name: Remove claude / codex / gh from PATH
+        run: |
+          for b in claude codex gh; do
+            for _ in 1 2 3; do
+              p="$(command -v "$b" || true)"
+              [ -z "$p" ] && break
+              sudo rm -f "$p"
+              hash -r
+            done
+            if command -v "$b" >/dev/null 2>&1; then
+              echo "::error::$b is still on PATH"
+              exit 1
+            fi
+          done
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Packaging (wheel → clean venv → harness --help)
+        env:
+          HARNESS_PACKAGING_TESTS: "1"
+        run: python -m pytest -q tests/test_packaging.py

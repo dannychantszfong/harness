@@ -6,7 +6,7 @@ GAN loop iteration, and progress file updates.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,6 +21,10 @@ from harness.progress.models import (
 )
 from harness.progress.tracker import ProgressTracker
 from harness.runners.base import PreflightResult, RunResult, RunnerType
+
+
+# Orchestrator.__init__ runs runner preflight; never depend on a real `claude`.
+pytestmark = pytest.mark.usefixtures("runners_ready")
 
 
 def _make_sprint_contract(feature_id: str = "f1") -> SprintContract:
@@ -262,7 +266,8 @@ class TestLiveConfigReload:
         edited.save_yaml(config_path)
         # Force mtime forward (writes within the same second can otherwise
         # share a timestamp on coarse filesystems).
-        import os, time
+        import os
+        import time
         future = time.time() + 10
         os.utime(config_path, (future, future))
 
@@ -324,7 +329,8 @@ class TestLiveConfigReload:
             project_id="deadbeef",      # tampered
         )
         tampered.save_yaml(config_path)
-        import os, time
+        import os
+        import time
         future = time.time() + 10
         os.utime(config_path, (future, future))
 
@@ -413,3 +419,42 @@ class TestLiveConfigReload:
             # The exact count is less important than "got called more than zero
             # times across both seams".
             assert spy.call_count >= 2
+
+
+def test_generator_timeout_records_failed_iteration_without_evaluator(
+    tmp_config, one_feature_progress
+):
+    """P-15: on timeout the iteration is recorded as failed with a clear
+    reason, and the evaluator is not asked to grade the timeout text."""
+    from harness.runners.base import RunnerTimeoutError
+
+    tmp_config.max_iterations_per_feature = 2
+    orchestrator = Orchestrator(tmp_config)
+
+    with (
+        patch.object(orchestrator, "_initialize", return_value=one_feature_progress),
+        patch.object(orchestrator, "_plan", return_value=one_feature_progress),
+        patch("harness.orchestrator.GeneratorAgent") as MockGen,
+        patch("harness.orchestrator.EvaluatorAgent") as MockEval,
+    ):
+        mock_gen = MockGen.return_value
+        mock_gen.negotiate_sprint_contract.return_value = _make_sprint_contract()
+        mock_gen.implement_feature.side_effect = [
+            RunnerTimeoutError(timeout_seconds=1800),
+            "self eval",
+        ]
+        mock_gen.usage = MagicMock(total_tokens=10, cost_usd=0.0)
+        mock_eval = MockEval.return_value
+        mock_eval.evaluate.return_value = _make_passing_eval(2)
+        mock_eval.usage = MagicMock(total_tokens=10, cost_usd=0.0)
+
+        orchestrator.run()
+
+        assert mock_eval.evaluate.call_count == 1  # only the real iteration
+        second_call = mock_gen.implement_feature.call_args_list[1].kwargs
+        assert "timed out" in second_call["evaluator_feedback"]
+
+    f1 = ProgressTracker(tmp_config).load().get_feature("f1")
+    assert f1.status == FeatureStatus.PASSING
+    assert f1.evaluation_history[0].failure_reason == "generator_timeout"
+    assert f1.evaluation_history[0].passed is False

@@ -17,7 +17,6 @@ Two layers, both checked:
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from harness.config import HarnessConfig
 from harness.agents.initializer import InitializerAgent

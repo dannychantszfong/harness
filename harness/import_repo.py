@@ -19,6 +19,7 @@ selected coding agent during `harness import`.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -172,21 +173,32 @@ def _find_readme(project_dir: Path) -> Optional[Path]:
     return None
 
 
+_SKIP_DIRS = frozenset({
+    ".git", "node_modules", "__pycache__", ".venv", "venv",
+    "dist", "build", ".pytest_cache", ".mypy_cache", "target",
+})
+
+
+def _walk_files(project_dir: Path, skip_dirs: frozenset[str] = _SKIP_DIRS):
+    """Yield files under project_dir, never descending into skip_dirs.
+
+    os.walk with in-place pruning: rglob would still enumerate everything
+    inside node_modules/.git before the caller could filter it out.
+    """
+    for root, dirs, files in os.walk(project_dir):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for name in files:
+            yield Path(root) / name
+
+
 def _count_code_files(project_dir: Path) -> int:
     """Cheap recursive count, capped to avoid pathological scans."""
     count = 0
     cap = 5000
-    skip_dirs = {
-        ".git", "node_modules", "__pycache__", ".venv", "venv",
-        "dist", "build", ".pytest_cache", ".mypy_cache", "target",
-    }
-    for p in project_dir.rglob("*"):
+    for p in _walk_files(project_dir):
         if count >= cap:
             break
-        # Skip anything inside excluded directories
-        if any(part in skip_dirs for part in p.parts):
-            continue
-        if p.is_file() and p.suffix.lower() in _CODE_FILE_SUFFIXES:
+        if p.suffix.lower() in _CODE_FILE_SUFFIXES:
             count += 1
     return count
 
@@ -194,19 +206,15 @@ def _count_code_files(project_dir: Path) -> int:
 def _has_tests(project_dir: Path) -> bool:
     if (project_dir / "tests").is_dir() or (project_dir / "test").is_dir():
         return True
-    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv"}
     seen = 0
-    for p in project_dir.rglob("*"):
+    for p in _walk_files(project_dir):
         if seen > 800:
             break
-        if any(part in skip_dirs for part in p.parts):
-            continue
-        if p.is_file():
-            seen += 1
-            name = p.name.lower()
-            rel = str(p.relative_to(project_dir)).lower()
-            if any(hint in rel or hint in name for hint in _TEST_HINTS):
-                return True
+        seen += 1
+        name = p.name.lower()
+        rel = p.relative_to(project_dir).as_posix().lower()
+        if any(hint in rel or hint in name for hint in _TEST_HINTS):
+            return True
     return False
 
 
@@ -243,7 +251,7 @@ def _read_brief_from_readme(readme_path: Path, max_chars: int = 500) -> Optional
         # Skip pure-badge / heading-only blocks
         if line.startswith("#") and len(line) < 80:
             continue
-        if all(l.strip().startswith(("[", "<", "!")) for l in line.splitlines()):
+        if all(row.strip().startswith(("[", "<", "!")) for row in line.splitlines()):
             continue
         paragraphs.append(line)
         if sum(len(p) for p in paragraphs) >= max_chars:
@@ -262,7 +270,7 @@ def assess_repo_spec_with_agent(
     project_dir: Path,
     *,
     suggested_brief: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int | None = None,
 ) -> RepoSpecAssessment:
     """Ask the coding agent whether the imported repo already contains a spec."""
     prompt = _build_spec_assessment_prompt(suggested_brief=suggested_brief)

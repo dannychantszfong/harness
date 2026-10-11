@@ -17,7 +17,6 @@ Individual agents are stateless; all state lives in files on disk.
 """
 
 from pathlib import Path
-from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
@@ -25,7 +24,7 @@ from rich.panel import Panel
 from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.agents import InitializerAgent, PlannerAgent, GeneratorAgent, EvaluatorAgent
 from harness.runners import create_runner, RunnerType
-from harness.runners.base import RunnerRateLimitedError
+from harness.runners.base import RunnerRateLimitedError, RunnerTimeoutError
 from harness import auto_resume
 from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
@@ -55,6 +54,10 @@ class Orchestrator:
         "evaluator_pass_score",
         "evaluator_weights",
         "max_iterations_per_feature",
+        "runner_timeout_seconds",
+        "planner_timeout_seconds",
+        "evaluator_timeout_seconds",
+        "sdk_max_turns",
         "context_reset_threshold_tokens",
         "sprint_contract_enabled",
         "code_runner_model",
@@ -401,7 +404,18 @@ class Orchestrator:
                         iteration=iteration,
                     )
 
-                self_eval = self._with_role_fallback("generator", _generate)
+                try:
+                    self_eval = self._with_role_fallback("generator", _generate)
+                except RunnerTimeoutError as exc:
+                    gen_agent = gen_holder.get("agent")
+                    if gen_agent is not None:
+                        self._account_tokens(gen_agent.usage.total_tokens)
+                    result = self._timeout_result(exc, iteration)
+                    console.print(f"  [red]✗ {exc} — iteration recorded as failed[/red]")
+                    progress = self.tracker.record_evaluation(progress, feature.id, result)
+                    feature = progress.get_feature(feature.id)
+                    evaluator_feedback = result.feedback
+                    continue
                 gen_agent = gen_holder.get("agent")
                 if gen_agent is not None:
                     self._account_tokens(gen_agent.usage.total_tokens)
@@ -467,6 +481,27 @@ class Orchestrator:
 
     def _account_tokens(self, tokens: int) -> None:
         self.total_tokens += tokens
+
+    @staticmethod
+    def _timeout_result(exc: RunnerTimeoutError, iteration: int) -> EvaluationResult:
+        """A failed, ungraded iteration for a generator session that timed out."""
+        limit = f" after {exc.timeout_seconds}s" if exc.timeout_seconds else ""
+        return EvaluationResult(
+            design_quality=0.0,
+            originality=0.0,
+            craft=0.0,
+            functionality=0.0,
+            overall_score=0.0,
+            feedback=(
+                f"The implementation session timed out{limit} and was not evaluated. "
+                "Work in smaller steps: get the core of the feature working first, "
+                "commit, then refine. Avoid long-running or interactive commands "
+                "(dev servers, watchers) that never exit."
+            ),
+            passed=False,
+            iteration=iteration,
+            failure_reason="generator_timeout",
+        )
 
     def _reload_config_if_changed(self) -> dict[str, tuple]:
         """Re-read harness_config.json and apply mutable field changes in place.

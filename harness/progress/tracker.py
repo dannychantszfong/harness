@@ -1,6 +1,5 @@
 import json
-from pathlib import Path
-from datetime import datetime
+from harness.timeutil import utcnow
 
 from harness.progress.models import (
     Feature,
@@ -40,7 +39,7 @@ class ProgressTracker:
     def save(self, progress: ProjectProgress) -> None:
         path = self.config.features_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        progress.last_updated = datetime.utcnow()
+        progress.last_updated = utcnow()
         path.write_text(progress.model_dump_json(indent=2))
         self._progress = progress
         self._write_markdown_summary(progress)
@@ -69,7 +68,7 @@ class ProgressTracker:
         if not feature:
             raise ValueError(f"Feature {feature_id} not found")
         feature.status = FeatureStatus.IN_PROGRESS
-        feature.last_updated = datetime.utcnow()
+        feature.last_updated = utcnow()
         progress.current_feature_id = feature_id
         self.save(progress)
         return progress
@@ -85,9 +84,9 @@ class ProgressTracker:
             raise ValueError(f"Feature {feature_id} not found")
         feature.evaluation_history.append(result)
         feature.status = FeatureStatus.PASSING if result.passed else FeatureStatus.FAILING
-        feature.last_updated = datetime.utcnow()
+        feature.last_updated = utcnow()
         if result.passed:
-            feature.implemented_at = datetime.utcnow()
+            feature.implemented_at = utcnow()
             progress.current_feature_id = None
         self.save(progress)
         return progress
@@ -102,7 +101,7 @@ class ProgressTracker:
         if not feature:
             raise ValueError(f"Feature {feature_id} not found")
         feature.sprint_contract = contract
-        feature.last_updated = datetime.utcnow()
+        feature.last_updated = utcnow()
         self.save(progress)
         return progress
 
@@ -113,14 +112,14 @@ class ProgressTracker:
     def _write_markdown_summary(self, progress: ProjectProgress) -> None:
         lines = [
             f"# {progress.project_name} — Progress",
-            f"",
+            "",
             f"**Brief:** {progress.brief}",
             f"**Completion:** {progress.completion_pct}% ({len(progress.passing_features)}/{len(progress.features)} features)",
             f"**Sessions:** {progress.session_count}",
             f"**Last updated:** {progress.last_updated.isoformat()}",
-            f"",
-            f"## Features",
-            f"",
+            "",
+            "## Features",
+            "",
         ]
         for f in sorted(progress.features, key=lambda x: x.priority):
             icon = {

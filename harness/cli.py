@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from pathlib import Path
 
-from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile
+from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile, check_env_secrets
 from harness.orchestrator import Orchestrator
 from harness.progress.tracker import ProgressTracker
 from harness.runner_profiles import (
@@ -295,6 +295,10 @@ def _build_setup_from_options(
         key, value = assignment.split("=", 1)
         if profile_name not in by_name:
             raise click.UsageError(f"Unknown profile for --profile-env: {profile_name}")
+        try:
+            check_env_secrets({key: value}, f"--profile-env {profile_name}")
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
         by_name[profile_name].env[key] = value
 
     for item in profile_extra_args:
@@ -446,7 +450,8 @@ def _require_anthropic_key_for_api_mode(orchestration_mode: str) -> None:
 
 def _harness_source_root() -> Path:
     """Find the local Harness checkout that the theme agent should edit."""
-    cli_root = Path(__file__).resolve().parent
+    # harness/cli.py lives inside the package, so the checkout root is two up.
+    cli_root = Path(__file__).resolve().parent.parent
     candidates = [cli_root, Path.cwd().resolve()]
     for root in candidates:
         if (root / "harness" / "ui" / "spinner.py").exists():

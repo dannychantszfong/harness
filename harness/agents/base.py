@@ -14,27 +14,47 @@ if TYPE_CHECKING:
 console = Console()
 
 
+def _number(value: Any) -> int | float:
+    """Reported usage values, ignoring None and anything non-numeric."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return value
+
+
 class TokenUsage:
     def __init__(self) -> None:
         self.input_tokens: int = 0
         self.output_tokens: int = 0
         self.cache_read_tokens: int = 0
         self.cache_write_tokens: int = 0
+        self.cost_usd: float = 0.0
+
+    def add_run_result(self, result: Any) -> None:
+        """Accumulate the usage a coding-agent runner reported (None = unknown).
+
+        Runner input_tokens already include cache writes (see RunResult).
+        """
+        self.input_tokens += _number(getattr(result, "input_tokens", None))
+        self.output_tokens += _number(getattr(result, "output_tokens", None))
+        self.cache_read_tokens += _number(getattr(result, "cache_read_tokens", None))
+        self.cost_usd += _number(getattr(result, "cost_usd", None))
 
     def update(self, usage: Any) -> None:
-        self.input_tokens += getattr(usage, "input_tokens", 0)
-        self.output_tokens += getattr(usage, "output_tokens", 0)
-        self.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
-        self.cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
+        self.input_tokens += _number(getattr(usage, "input_tokens", 0))
+        self.output_tokens += _number(getattr(usage, "output_tokens", 0))
+        self.cache_read_tokens += _number(getattr(usage, "cache_read_input_tokens", 0))
+        self.cache_write_tokens += _number(getattr(usage, "cache_creation_input_tokens", 0))
 
     @property
     def total_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens
+        """New tokens that entered a context (cache reads are re-reads, excluded)."""
+        return self.input_tokens + self.cache_write_tokens + self.output_tokens
 
     def __repr__(self) -> str:
         return (
             f"TokenUsage(in={self.input_tokens}, out={self.output_tokens}, "
-            f"cache_read={self.cache_read_tokens}, cache_write={self.cache_write_tokens})"
+            f"cache_read={self.cache_read_tokens}, cache_write={self.cache_write_tokens}, "
+            f"cost=${self.cost_usd:.4f})"
         )
 
 
@@ -75,7 +95,7 @@ class BaseAgent(ABC):
         system: str,
         messages: list[dict],
         tools: list[dict] | None = None,
-        max_tokens: int = 8096,
+        max_tokens: int = 8192,
         stream: bool = True,
         extra_headers: dict | None = None,
     ) -> tuple[str, list[dict]]:
@@ -118,7 +138,7 @@ class BaseAgent(ABC):
             self.usage.update(resp.usage)
             for block in resp.content:
                 if block.type == "text":
-                    full_text = block.text
+                    full_text += block.text
                     console.print(block.text)
                 elif block.type == "tool_use":
                     tool_uses.append({"id": block.id, "name": block.name, "input": block.input})
@@ -136,7 +156,8 @@ class BaseAgent(ABC):
                 "orchestration_mode='runner' but no runner was passed to this agent."
             )
         cwd = str(self.config.output_path)
-        result = self.runner.implement(prompt, cwd=cwd)
+        result = self.runner.implement(prompt, cwd=cwd, timeout_seconds=self._runner_timeout())
+        self.usage.add_run_result(result)
         if not result.success:
             if result.rate_limited or result.rate_limit_reset_at is not None:
                 from harness.runners.base import RunnerRateLimitedError
@@ -145,12 +166,12 @@ class BaseAgent(ABC):
                     raw_message=result.error or "",
                 )
             raise RuntimeError(f"Runner failed during orchestration: {result.error}")
-        # Accumulate token data when the runner provides it
-        if result.input_tokens:
-            self.usage.input_tokens += result.input_tokens
-        if result.output_tokens:
-            self.usage.output_tokens += result.output_tokens
         return result.output
+
+    def _runner_timeout(self) -> int | None:
+        """Role-specific runner timeout (planner/evaluator), else the runner default."""
+        value = getattr(self.config, f"{self.role}_timeout_seconds", None)
+        return value if isinstance(value, int) and value > 0 else None
 
     @property
     def _use_runner(self) -> bool:

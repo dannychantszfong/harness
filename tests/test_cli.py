@@ -13,14 +13,13 @@ at collection time. That's a meaningful guard against the kind of
 """
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
-import cli
-from cli import main
+from harness import cli
+from harness.cli import main
 from harness.config import CONFIG_FILENAME
 from harness.runner_profiles import HarnessSetup, save_setup
 from harness.runners.base import PreflightResult, RunResult
@@ -91,7 +90,7 @@ def test_new_persists_agentic_coding_model(runner, tmp_path, monkeypatch):
         def run(self, *a, **kw):
             captured["ran"] = True
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrchestrator)
 
     result = runner.invoke(
         main,
@@ -129,7 +128,7 @@ def test_new_persists_project_github_repo(runner, tmp_path, monkeypatch):
         def run(self, *a, **kw):
             captured["ran"] = True
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrchestrator)
 
     result = runner.invoke(
         main,
@@ -223,7 +222,7 @@ def test_new_loads_setup_profiles_without_runner_prompt(runner, tmp_path, monkey
         def run(self, *a, **kw):
             captured["ran"] = True
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrchestrator)
 
     result = runner.invoke(main, ["new"], input="Harness\nBuild a thing\n")
 
@@ -345,7 +344,7 @@ def test_resume_loads_config_and_invokes_orchestrator(runner, tmp_path, monkeypa
             captured["ran"] = True
 
     # Patch the symbol the cli module looks up
-    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrchestrator)
 
     result = runner.invoke(main, ["resume", str(project_dir)])
     assert result.exit_code == 0, result.output
@@ -381,7 +380,7 @@ def test_resume_bare_list_features_shown_as_normalize_pending(
     class FakeOrchestrator:
         def __init__(self, *a, **k): pass
         def run(self, *a, **k): captured["ran"] = True
-    monkeypatch.setattr("cli.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrchestrator)
 
     result = runner.invoke(main, ["resume", str(project_dir)])
     assert result.exit_code == 0, result.output
@@ -428,7 +427,6 @@ def test_resume_skips_re_init_when_features_already_present(runner, tmp_path, mo
 
     real_init = Orchestrator._initialize
     real_plan = Orchestrator._plan
-    real_loop = Orchestrator._feature_loop
 
     def fake_init(self, *a, **k):
         calls.append("init")

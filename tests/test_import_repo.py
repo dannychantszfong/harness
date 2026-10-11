@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
-from cli import main
+from harness.cli import main
 from harness.config import CONFIG_FILENAME
 from harness.import_repo import (
     EntryPhase,
@@ -232,7 +232,7 @@ def test_import_review_ready_routes_to_review_only(runner, tmp_path, monkeypatch
         def run(self, *, review_only=False, **kw):
             captured["review_only"] = review_only
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     monkeypatch.chdir(tmp_path)
 
     # Use --in-place + -r subprocess so we don't trigger the runner picker
@@ -257,7 +257,7 @@ def test_import_no_review_flag_forces_build(runner, tmp_path, monkeypatch):
         def run(self, *, review_only=False, **kw):
             captured["review_only"] = review_only
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
         "import", str(src), "--in-place", "--no-review", "-r", "subprocess",
@@ -281,7 +281,7 @@ def test_import_review_flag_forces_review_on_unfinished(runner, tmp_path, monkey
         def run(self, *, review_only=False, **kw):
             captured["review_only"] = review_only
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
         "import", str(src), "--in-place", "--review", "-r", "subprocess",
@@ -301,7 +301,7 @@ def test_import_copy_mode_creates_output_dir(runner, tmp_path, monkeypatch):
         def __init__(self, *a, **k): pass
         def run(self, **k): pass
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
@@ -331,7 +331,7 @@ def test_import_persists_project_git_remote(runner, tmp_path, monkeypatch):
             captured["config"] = cfg
         def run(self, **k): pass
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
@@ -364,7 +364,7 @@ def test_import_copy_mode_rehomes_existing_harness_config(runner, tmp_path, monk
             captured["config"] = cfg
         def run(self, **k): pass
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
@@ -404,7 +404,7 @@ def test_import_agent_spec_written_before_orchestrator(runner, tmp_path, monkeyp
                 success=True,
             )
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     monkeypatch.setattr("harness.runners.create_runner", lambda *a, **k: FakeRunner())
     monkeypatch.chdir(tmp_path)
 
@@ -428,7 +428,7 @@ def test_import_in_place_mode_does_not_create_output_dir(runner, tmp_path, monke
         def __init__(self, *a, **k): pass
         def run(self, **k): pass
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, [
@@ -450,7 +450,7 @@ def test_import_refuses_to_overwrite_existing_output(runner, tmp_path, monkeypat
         def __init__(self, *a, **k): pass
         def run(self, **k): pass
 
-    monkeypatch.setattr("cli.Orchestrator", FakeOrch)
+    monkeypatch.setattr("harness.cli.Orchestrator", FakeOrch)
     _stub_no_spec_assessment(monkeypatch)
     monkeypatch.chdir(tmp_path)
     # Pre-create the destination

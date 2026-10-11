@@ -28,7 +28,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import os
+from pathlib import Path
 from typing import Optional
+
+# Fallback when a config object does not carry runner_timeout_seconds.
+DEFAULT_RUNNER_TIMEOUT_SECONDS = 1800
 
 
 class RunnerRateLimitedError(RuntimeError):
@@ -45,6 +49,23 @@ class RunnerRateLimitedError(RuntimeError):
             message = f"Subscription rate limit hit; resets at {reset_at.isoformat()}"
         else:
             message = "Runner usage limit hit; no reset time was reported"
+        super().__init__(message)
+
+
+class RunnerTimeoutError(RuntimeError):
+    """Raised by the generator when its runner session hit the timeout.
+
+    The orchestrator records a failed iteration with a clear reason instead
+    of handing the timeout text to the evaluator as a "self-evaluation".
+    """
+
+    def __init__(self, timeout_seconds: int | None = None, raw_message: str = ""):
+        self.timeout_seconds = timeout_seconds
+        self.raw_message = raw_message
+        if timeout_seconds:
+            message = f"Runner session timed out after {timeout_seconds}s"
+        else:
+            message = "Runner session timed out"
         super().__init__(message)
 
 
@@ -96,10 +117,18 @@ class RunResult:
     output: str
     success: bool
     error: Optional[str] = None
-    # Token/cost data — populated by API runners; None for agentic runners
+    # Token/cost data reported by the runtime (None when it reports nothing).
+    # input_tokens counts *new* prompt tokens (uncached input + cache writes);
+    # cache_read_tokens counts prompt tokens served from the prompt cache.
+    # cost_usd is the runtime's own figure — on a subscription it is the
+    # API-equivalent list price, not what the user is billed.
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    cache_read_tokens: Optional[int] = None
     cost_usd: Optional[float] = None
+    session_id: Optional[str] = None
+    # True when the session was killed by the runner timeout.
+    timed_out: bool = False
     # Tool calls observed (SDK runner only)
     tool_calls_observed: list[str] = field(default_factory=list)
     # Subscription rate-limit reset time (UTC) when the runner hit a usage cap.
@@ -180,9 +209,40 @@ class CodeRunner(ABC):
         ...
 
     @abstractmethod
-    def implement(self, prompt: str, cwd: str, timeout_seconds: int = 600) -> RunResult:
-        """Run one complete implementation session for a single feature."""
+    def implement(
+        self,
+        prompt: str,
+        cwd: str,
+        timeout_seconds: int | None = None,
+    ) -> RunResult:
+        """Run one complete implementation session for a single feature.
+
+        timeout_seconds=None means "use config.runner_timeout_seconds".
+        """
         ...
+
+    def _timeout(self, timeout_seconds: int | None) -> int:
+        if timeout_seconds:
+            return timeout_seconds
+        return int(
+            getattr(self.config, "runner_timeout_seconds", None)
+            or DEFAULT_RUNNER_TIMEOUT_SECONDS
+        )
+
+
+def missing_cwd_result(cwd: str) -> Optional[RunResult]:
+    """A RunResult describing a missing working directory, or None if it exists.
+
+    Checked before spawning so a bad cwd is not misreported as a missing
+    binary (subprocess raises FileNotFoundError for both).
+    """
+    if Path(cwd).is_dir():
+        return None
+    return RunResult(
+        output="",
+        success=False,
+        error=f"Runner working directory does not exist: {cwd}",
+    )
 
 
 def _expand_env_value(value: str) -> str:

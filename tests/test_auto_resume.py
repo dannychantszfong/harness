@@ -8,7 +8,6 @@ import os
 import platform
 import subprocess
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,9 +16,9 @@ from harness import auto_resume
 from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.orchestrator import Orchestrator
 from harness.runners.base import (
-    PreflightResult, RunnerRateLimitedError, RunResult, RunnerType,
+    PreflightResult, RunResult, RunnerType,
 )
-from harness.runners.subprocess_runner import _parse_reset_time
+from harness.runners._rate_limit import parse_reset_time as _parse_reset_time
 
 
 _DARWIN = platform.system() == "Darwin"
@@ -137,8 +136,60 @@ def test_linux_systemd_schedule_writes_units(tmp_path, monkeypatch):
     assert scheduled["backend"] == "systemd"
     assert scheduled["service"].exists()
     assert scheduled["timer"].exists()
-    assert "OnCalendar=" in scheduled["timer"].read_text()
+    timer = scheduled["timer"].read_text()
+    assert "OnCalendar=" in timer
+    # A run missed while the machine sleeps fires on wake instead of being lost
+    assert "Persistent=true" in timer
     assert ["systemctl", "--user", "enable", "--now", scheduled["timer"].name] in calls
+
+
+def test_systemd_without_user_session_raises_actionable_error(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(auto_resume.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(auto_resume, "_systemd_dir", lambda: tmp_path / "systemd")
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["systemctl", "--user", "show-environment"]:
+            return MagicMock(returncode=1, stdout="", stderr="Failed to connect to bus: No medium found")
+        raise AssertionError(f"unexpected call {args}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError) as exc:
+        auto_resume.schedule(
+            project_dir=project_dir,
+            project_id="nobus",
+            fire_at_utc=datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc),
+            harness_binary="/usr/local/bin/harness",
+        )
+    assert "loginctl enable-linger" in str(exc.value)
+    assert "harness resume" in str(exc.value)
+
+
+def test_wrappers_resume_absolute_path_with_captured_path(tmp_path, monkeypatch):
+    """Scheduler environments have a minimal PATH; the wrapper must restore the
+    PATH active at scheduling time so the resumed run finds claude/codex."""
+    monkeypatch.setenv("PATH", "/opt/agent bin:/usr/bin")
+    project_dir = tmp_path / "my proj"
+    project_dir.mkdir()
+    sh = auto_resume._systemd_wrapper_script(project_dir, "/usr/local/bin/harness", project_dir / "log")
+    assert "export PATH='/opt/agent bin:/usr/bin'" in sh
+    assert f"PROJECT_DIR='{project_dir}'" in sh
+    assert '"$HARNESS" resume "$PROJECT_DIR"' in sh
+
+    ps = auto_resume._powershell_wrapper(project_dir, r"C:\Tools\harness.exe", project_dir / "log", "T")
+    assert "$env:PATH = '/opt/agent bin:/usr/bin'" in ps
+    assert "PYTHONIOENCODING" in ps
+    assert "& $Harness resume $ProjectDir" in ps
+
+
+def test_wrappers_never_embed_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
+    sh = auto_resume._systemd_wrapper_script(tmp_path, "harness", tmp_path / "log")
+    ps = auto_resume._powershell_wrapper(tmp_path, "harness", tmp_path / "log", "T")
+    assert "sk-ant-should-not-leak" not in sh + ps
 
 
 def test_windows_task_scheduler_schedule_writes_wrapper(tmp_path, monkeypatch):
@@ -157,25 +208,43 @@ def test_windows_task_scheduler_schedule_writes_wrapper(tmp_path, monkeypatch):
         }.get(name),
     )
 
+    task_xml = {}
+
     def fake_run(args, **kwargs):
         calls.append(args)
+        if args[:2] == ["schtasks", "/Create"] and "/XML" in args:
+            xml_path = args[args.index("/XML") + 1]
+            task_xml["text"] = open(xml_path, encoding="utf-16").read()
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
+    fire_at = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
     scheduled = auto_resume.schedule(
         project_dir=project_dir,
         project_id="win01",
-        fire_at_utc=datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc),
+        fire_at_utc=fire_at,
         buffer_seconds=0,
     )
 
     assert scheduled["backend"] == "task_scheduler"
     assert scheduled["wrapper"].suffix == ".ps1"
-    assert "harness.exe" in scheduled["wrapper"].read_text()
+    wrapper_text = scheduled["wrapper"].read_text(encoding="utf-8-sig")
+    assert "harness.exe" in wrapper_text
+    # BOM so Windows PowerShell 5.1 reads non-ASCII paths as UTF-8
+    assert scheduled["wrapper"].read_bytes().startswith(b"\xef\xbb\xbf")
     create_call = next(args for args in calls if args[:2] == ["schtasks", "/Create"])
-    assert "/SC" in create_call
-    assert "ONCE" in create_call
+    # Locale-independent XML definition, not /SC ONCE /SD <locale date>
+    assert "/XML" in create_call
+    assert "/SD" not in create_call
+    xml = task_xml["text"]
+    local = fire_at.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+    assert f"<StartBoundary>{local}</StartBoundary>" in xml
+    assert "<StartWhenAvailable>true</StartWhenAvailable>" in xml
+    assert "powershell.exe</Command>" in xml
+    assert str(scheduled["wrapper"]) in xml
+    # The temporary XML file is removed after registration
+    assert not os.path.exists(create_call[create_call.index("/XML") + 1])
 
 
 # ── End-to-end (Darwin only) ─────────────────────────────────────────────────

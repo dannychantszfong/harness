@@ -12,8 +12,7 @@ The evaluator never writes code. It only observes and judges.
 import re
 
 from harness.agents.base import BaseAgent
-from harness.config import HarnessConfig
-from harness.progress.models import Feature, EvaluationResult, SprintContract
+from harness.progress.models import Feature, EvaluationResult
 
 _SYSTEM = """You are an adversarial QA evaluator grading AI-generated software.
 

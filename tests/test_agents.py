@@ -202,3 +202,45 @@ def test_runner_mode_agents_dont_require_api_key(tmp_path, monkeypatch):
     PlannerAgent(config)
     EvaluatorAgent(config)
     GeneratorAgent(config, runner=MagicMock())
+
+
+def test_generator_timeout_raises_instead_of_fake_self_eval(runner_config):
+    """P-15: a timed-out session must not be handed to the evaluator as text."""
+    from harness.runners.base import RunnerTimeoutError
+
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(
+        output="", success=False, error="Claude Code timed out after 1800s", timed_out=True,
+    )
+    agent = GeneratorAgent(runner_config, runner=runner)
+    feature = Feature(id="f1", name="Login", description="signup + login", priority=0)
+
+    with pytest.raises(RunnerTimeoutError) as exc:
+        agent.implement_feature(feature=feature, progress=MagicMock(), session_preamble="ctx")
+    assert exc.value.timeout_seconds == runner_config.runner_timeout_seconds
+
+
+def test_role_timeouts_are_passed_to_the_runner(runner_config):
+    runner_config.evaluator_timeout_seconds = 300
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(output="<evaluation></evaluation>", success=True)
+    EvaluatorAgent(runner_config, runner=runner)._call_via_runner("grade this")
+    assert runner.implement.call_args.kwargs["timeout_seconds"] == 300
+
+    runner.implement.reset_mock()
+    GeneratorAgent(runner_config, runner=runner).implement_feature(
+        feature=Feature(id="f1", name="A", description="a"), progress=MagicMock(), session_preamble="",
+    )
+    # generator has no role override → runner default (config.runner_timeout_seconds)
+    assert runner.implement.call_args.kwargs["timeout_seconds"] is None
+
+
+def test_runner_usage_accumulates_even_on_failure(runner_config):
+    runner = MagicMock()
+    runner.implement.return_value = RunResult(
+        output="partial", success=False, error="boom", input_tokens=100, output_tokens=20, cost_usd=0.5,
+    )
+    agent = GeneratorAgent(runner_config, runner=runner)
+    agent.implement_feature(feature=Feature(id="f1", name="A", description="a"), progress=MagicMock(), session_preamble="")
+    assert agent.usage.total_tokens == 120
+    assert agent.usage.cost_usd == pytest.approx(0.5)
