@@ -59,6 +59,10 @@ class Feature(BaseModel):
     commit_sha: Optional[str] = None
     # Branches preserving exhausted attempts: harness/attempt/<id>/<n>.
     attempt_branches: list[str] = Field(default_factory=list)
+    # Usage spent on this feature (contract, generator, evaluator sessions).
+    # cost_usd is the runtimes' own figure (API-equivalent on a subscription).
+    tokens_used: int = 0
+    cost_usd: float = 0.0
 
     @property
     def latest_evaluation(self) -> Optional[EvaluationResult]:

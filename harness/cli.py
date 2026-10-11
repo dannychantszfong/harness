@@ -11,7 +11,7 @@ from pathlib import Path
 from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile, check_env_secrets
 from harness.orchestrator import Orchestrator
 from harness.progress.models import FeatureStatus
-from harness.progress.tracker import ProgressTracker
+from harness.progress.tracker import ProgressTracker, usage_summary
 from harness.runner_profiles import (
     HarnessSetup,
     apply_setup_defaults,
@@ -1404,6 +1404,10 @@ def status(config_file: str):
         f"({len(progress.passing_features)}/{len(progress.features)} features)"
     )
     console.print(f"Sessions: {progress.session_count}")
+    console.print(f"Usage: {usage_summary(progress.total_tokens_used, progress.total_cost_usd, config)}")
+    exhausted = progress.exhausted_features(config.max_iterations_per_feature)
+    if exhausted:
+        console.print(f"[yellow]Exhausted retries: {len(exhausted)}[/yellow]")
     console.print()
 
     for feature in sorted(progress.features, key=lambda f: f.priority):
@@ -1413,10 +1417,16 @@ def status(config_file: str):
             "passing": "✅",
             "failing": "❌",
         }.get(feature.status.value, "?")
-        score = ""
+        details = []
         if feature.latest_evaluation:
-            score = f" ({feature.latest_evaluation.overall_score:.1f}/10)"
-        console.print(f"  {icon} {escape(f'[{feature.id}] {feature.name}')}{score}")
+            details.append(f"{feature.latest_evaluation.overall_score:.1f}/10")
+        if feature.tokens_used:
+            cost = f", ${feature.cost_usd:,.2f}" if feature.cost_usd else ""
+            details.append(f"{feature.tokens_used:,} tok{cost}")
+        if feature in exhausted:
+            details.append("exhausted")
+        suffix = f" ({' · '.join(details)})" if details else ""
+        console.print(f"  {icon} {escape(f'[{feature.id}] {feature.name}')}{suffix}")
 
 
 @main.command()

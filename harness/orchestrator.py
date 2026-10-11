@@ -25,13 +25,19 @@ from rich.panel import Panel
 
 from harness.config import CONFIG_FILENAME, HarnessConfig
 from harness.agents import InitializerAgent, PlannerAgent, GeneratorAgent, EvaluatorAgent
+from harness.agents.base import _number
 from harness.runners import create_runner, RunnerType
 from harness.runners.base import RunnerRateLimitedError, RunnerTimeoutError
 from harness import auto_resume
 from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
 from harness.progress.attempts import read_lessons, write_attempt_notes
-from harness.progress.tracker import ProgressTracker, attempts_file_relpath, write_atomic
+from harness.progress.tracker import (
+    ProgressTracker,
+    attempts_file_relpath,
+    usage_summary,
+    write_atomic,
+)
 from harness.progress.models import EvaluationResult, FeatureStatus, ProjectProgress
 from harness.project_git import (
     ProjectGitConfigurationError,
@@ -183,6 +189,10 @@ class Orchestrator:
         else:
             lines = [f"[bold yellow]Finished.[/bold yellow] {passing}/{total} features passing."]
             title = "Harness Finished"
+        lines.append(
+            f"[dim]Usage:[/dim] "
+            f"{usage_summary(final.total_tokens_used, final.total_cost_usd, self.config)}"
+        )
         if exhausted:
             lines.append(
                 f"\n[yellow]{len(exhausted)} feature{'s' if len(exhausted) != 1 else ''} "
@@ -302,13 +312,17 @@ class Orchestrator:
 
     def _initialize(self, confirmed_spec: str | None = None) -> ProjectProgress:
         console.print("\n[bold blue]Phase 1: Initialize[/bold blue]")
-        return self._with_role_fallback(
-            "initializer",
-            lambda runner: InitializerAgent(self.config, runner=runner).run(
-                brief=self.config.brief,
-                spec=confirmed_spec,
-            ),
-        )
+        holder = {}
+
+        def _run_initializer(runner):
+            agent = InitializerAgent(self.config, runner=runner)
+            holder["agent"] = agent
+            return agent.run(brief=self.config.brief, spec=confirmed_spec)
+
+        progress = self._with_role_fallback("initializer", _run_initializer)
+        if holder.get("agent") is not None:
+            progress = self._account_usage(progress, holder["agent"])
+        return progress
 
     def _plan(
         self,
@@ -374,7 +388,7 @@ class Orchestrator:
         self.tracker.save(progress)
         agent = holder.get("agent")
         if agent is not None:
-            self._account_tokens(agent.usage.total_tokens)
+            progress = self._account_usage(progress, agent)
         return progress
 
     def _feature_loop(self, progress: ProjectProgress) -> None:
@@ -419,6 +433,8 @@ class Orchestrator:
             feature = progress.get_feature(feature.id)
 
             session_ctx = self._session_context(progress, feature)
+            # A between-features handoff is for the first feature after it only.
+            self._handoff_fresh = False
             lessons = read_lessons(project_dir, feature.id)
             if lessons:
                 console.print(f"  [dim]Injecting lessons from {attempts_file_relpath(feature.id)}[/dim]")
@@ -427,15 +443,19 @@ class Orchestrator:
             if self.config.sprint_contract_enabled and feature.sprint_contract is None:
                 console.print("  Negotiating sprint contract...")
 
+                contract_holder = {}
+
                 def _negotiate(runner):
-                    return GeneratorAgent(
-                        self.config, runner=runner or self.runner,
-                    ).negotiate_sprint_contract(
+                    agent = GeneratorAgent(self.config, runner=runner or self.runner)
+                    contract_holder["agent"] = agent
+                    return agent.negotiate_sprint_contract(
                         feature=feature,
                         spec=progress.spec or self.config.brief,
                     )
 
                 contract = self._with_role_fallback("generator", _negotiate, protect_state=True)
+                if contract_holder.get("agent") is not None:
+                    progress = self._account_usage(progress, contract_holder["agent"], feature.id)
                 progress = self.tracker.attach_sprint_contract(progress, feature.id, contract)
                 feature = progress.get_feature(feature.id)  # refresh
 
@@ -478,7 +498,7 @@ class Orchestrator:
                 except RunnerTimeoutError as exc:
                     gen_agent = gen_holder.get("agent")
                     if gen_agent is not None:
-                        self._account_tokens(gen_agent.usage.total_tokens)
+                        progress = self._account_usage(progress, gen_agent, feature.id)
                     result = self._timeout_result(exc, iteration)
                     console.print(f"  [red]✗ {exc} — iteration recorded as failed[/red]")
                     progress = self.tracker.record_evaluation(progress, feature.id, result)
@@ -488,7 +508,7 @@ class Orchestrator:
                 last_self_eval = self_eval
                 gen_agent = gen_holder.get("agent")
                 if gen_agent is not None:
-                    self._account_tokens(gen_agent.usage.total_tokens)
+                    progress = self._account_usage(progress, gen_agent, feature.id)
 
                 eval_holder = {}
 
@@ -508,7 +528,7 @@ class Orchestrator:
                 )
                 eval_agent = eval_holder.get("agent")
                 if eval_agent is not None:
-                    self._account_tokens(eval_agent.usage.total_tokens)
+                    progress = self._account_usage(progress, eval_agent, feature.id)
 
                 if result.parse_failed:
                     # P-07: ask once more before the iteration is counted.
@@ -531,7 +551,7 @@ class Orchestrator:
                     result = self._with_role_fallback("evaluator", _reevaluate, protect_state=True)
                     eval_agent = eval_holder.get("agent")
                     if eval_agent is not None:
-                        self._account_tokens(eval_agent.usage.total_tokens)
+                        progress = self._account_usage(progress, eval_agent, feature.id)
 
                 self._print_eval_summary(result)
 
@@ -564,6 +584,13 @@ class Orchestrator:
                 )
                 progress = self._handle_exhausted(progress, feature.id, last_self_eval)
 
+            # Seam reset: the budget can also run out on a feature that passed.
+            if self.should_reset():
+                console.print("  [red]Context budget exceeded — starting a new session[/red]")
+                self._handoff = self._do_seam_reset(progress, feature.id)
+                self._handoff_fresh = True
+                self.total_tokens = 0
+
             progress = self.tracker.load()  # reload from disk
 
 
@@ -573,6 +600,19 @@ class Orchestrator:
 
     def _account_tokens(self, tokens: int) -> None:
         self.total_tokens += tokens
+
+    def _account_usage(
+        self,
+        progress: ProjectProgress,
+        agent,
+        feature_id: str | None = None,
+    ) -> ProjectProgress:
+        """Count an agent's usage toward the reset budget (C-01) and cost (C-04)."""
+        usage = getattr(agent, "usage", None)
+        tokens = _number(getattr(usage, "total_tokens", 0))
+        cost = _number(getattr(usage, "cost_usd", 0.0))
+        self._account_tokens(int(tokens))
+        return self.tracker.add_usage(progress, feature_id, int(tokens), float(cost))
 
     def _handoff_for(self, feature) -> HandoffDocument | None:
         """The handoff to show while working on `feature` (P-27).
@@ -909,6 +949,31 @@ class Orchestrator:
                 f"Address the evaluator feedback before retrying."
             ),
             warnings=[last_feedback[:500]] if last_feedback else [],
+        )
+
+    def _do_seam_reset(self, progress: ProjectProgress, finished_feature_id: str) -> HandoffDocument:
+        """Reset between features: a handoff for whichever feature comes next."""
+        finished = progress.get_feature(finished_feature_id)
+        self.session_number += 1
+        progress.session_count = self.session_number
+        self.tracker.save(progress)
+        upcoming = progress.next_actionable_feature(self.config.max_iterations_per_feature)
+        outcome = "passed" if finished.status == FeatureStatus.PASSING else "did not pass"
+        return self.context_reset.build_handoff(
+            progress=progress,
+            session_number=self.session_number,
+            what_was_done=(
+                f"Finished feature '{finished.name}' ({finished.id}); it {outcome} after "
+                f"{finished.iteration_count} iteration(s)."
+            ),
+            current_state=(
+                f"{len(progress.passing_features)}/{len(progress.features)} features passing."
+            ),
+            next_action=(
+                f"Implement feature '{upcoming.name}' (id: {upcoming.id})."
+                if upcoming else "No features left to attempt."
+            ),
+            feature_id=None,
         )
 
     def _print_runner_status(self) -> None:

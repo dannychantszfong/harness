@@ -232,6 +232,25 @@ class ProgressTracker:
         self.save(progress)
         return progress
 
+    def add_usage(
+        self,
+        progress: ProjectProgress,
+        feature_id: Optional[str],
+        tokens: int,
+        cost_usd: float,
+    ) -> ProjectProgress:
+        """Accumulate session usage into the project (and feature) totals (C-04)."""
+        if not tokens and not cost_usd:
+            return progress
+        progress.total_tokens_used += int(tokens)
+        progress.total_cost_usd += float(cost_usd)
+        feature = progress.get_feature(feature_id) if feature_id else None
+        if feature is not None:
+            feature.tokens_used += int(tokens)
+            feature.cost_usd += float(cost_usd)
+        self.save(progress)
+        return progress
+
     def attach_sprint_contract(
         self,
         progress: ProjectProgress,
@@ -263,6 +282,7 @@ class ProgressTracker:
             f"**Brief:** {progress.brief}",
             f"**Completion:** {progress.completion_pct}% ({len(progress.passing_features)}/{len(progress.features)} features)",
             f"**Sessions:** {progress.session_count}",
+            f"**Usage:** {usage_summary(progress.total_tokens_used, progress.total_cost_usd, self.config)}",
             f"**Last updated:** {progress.last_updated.isoformat()}",
             "",
             "## Features",
@@ -275,10 +295,13 @@ class ProgressTracker:
                 FeatureStatus.PASSING: "✅",
                 FeatureStatus.FAILING: "❌",
             }[f.status]
-            score_str = ""
+            details = []
             if f.latest_evaluation:
-                score_str = f" (score: {f.latest_evaluation.overall_score:.1f}/10)"
-            lines.append(f"- {icon} **{f.name}**{score_str} — {f.description}")
+                details.append(f"score: {f.latest_evaluation.overall_score:.1f}/10")
+            if f.tokens_used:
+                details.append(f"{f.tokens_used:,} tokens")
+            detail_str = f" ({', '.join(details)})" if details else ""
+            lines.append(f"- {icon} **{f.name}**{detail_str} — {f.description}")
 
         exhausted = progress.exhausted_features(max_iterations)
         if exhausted:
@@ -296,6 +319,20 @@ class ProgressTracker:
                 )
 
         write_atomic(self.config.progress_path, "\n".join(lines).encode("utf-8"))
+
+
+def usage_summary(tokens: int, cost_usd: float, config: HarnessConfig) -> str:
+    """'123,456 tokens · cost: subscription (≈$1.23 at API prices)' and friends."""
+    text = f"{tokens:,} tokens"
+    if config.billing_mode == "subscription":
+        text += " · cost: subscription"
+        if cost_usd:
+            text += f" (≈${cost_usd:,.2f} at API prices)"
+    elif cost_usd:
+        text += f" · ${cost_usd:,.2f}"
+    else:
+        text += " · cost: not reported"
+    return text
 
 
 def attempts_file_relpath(feature_id: str) -> str:

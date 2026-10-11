@@ -410,3 +410,19 @@ class HarnessConfig(BaseModel):
     @property
     def spec_path(self) -> Path:
         return self.output_path / self.spec_file
+
+    @property
+    def billing_mode(self) -> Literal["subscription", "api"]:
+        """How usage is paid for, for cost display (C-04).
+
+        "subscription" when every agent runs through coding-agent runners on
+        subscription profiles (the default); "api" as soon as the Anthropic
+        API orchestrates or a profile bills an API provider. On a
+        subscription the runtimes' cost figure is an API-price equivalent.
+        """
+        if self.orchestration_mode == "api":
+            return "api"
+        enabled = [p for p in self.runner_profiles if p.enabled]
+        if enabled and any(p.provider != "subscription" for p in enabled):
+            return "api"
+        return "subscription"
