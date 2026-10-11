@@ -133,7 +133,9 @@ def test_evaluator_session_is_read_only_with_allow_listed_commands(cfg):
     assert "Write" not in tools and "Edit" not in tools
     assert f"Bash({cfg.startup_command_for_platform})" in tools
     assert "Bash(pytest -q *)" in tools
-    assert "Bash(git diff *)" in tools and "Bash(git log *)" in tools
+    assert "Bash(git diff)" in tools and "Bash(git log --oneline -20)" in tools
+    # No wildcard git rules: `git log --output=<file>` would be a write
+    assert not any(t.startswith("Bash(git") and t.endswith("*)") for t in tools)
 
 
 def test_generator_keeps_full_access(cfg):

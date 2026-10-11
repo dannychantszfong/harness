@@ -40,7 +40,7 @@ def _capture_run(monkeypatch, completed, binary="/usr/bin/tool"):
         return completed
 
     monkeypatch.setattr("shutil.which", lambda _: binary)
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
     return captured
 
 
@@ -91,7 +91,7 @@ def test_codex_prompt_goes_through_stdin(cfg, tmp_path, monkeypatch):
 
 def test_subprocess_oserror_is_reported_not_raised(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", MagicMock(side_effect=OSError(7, "Argument list too long")))
+    monkeypatch.setattr("harness.runners.base.run_process", MagicMock(side_effect=OSError(7, "Argument list too long")))
 
     result = SubprocessRunner(cfg).implement("p", cwd=str(tmp_path))
 
@@ -114,7 +114,7 @@ def test_runner_launches_resolved_binary_path(cfg, tmp_path, monkeypatch):
 def test_missing_cwd_is_reported_as_missing_directory(cfg, tmp_path, monkeypatch, runner_cls):
     run = MagicMock()
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tool")
-    monkeypatch.setattr("subprocess.run", run)
+    monkeypatch.setattr("harness.runners.base.run_process", run)
 
     result = runner_cls(cfg).implement("p", cwd=str(tmp_path / "does-not-exist"))
 
@@ -149,7 +149,7 @@ def test_runner_timeout_defaults_to_config(cfg, tmp_path, monkeypatch):
 def test_timeout_sets_timed_out_flag(cfg, tmp_path, monkeypatch, runner_cls):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tool")
     monkeypatch.setattr(
-        "subprocess.run",
+        "harness.runners.base.run_process",
         MagicMock(side_effect=subprocess.TimeoutExpired(cmd="tool", timeout=5)),
     )
     result = runner_cls(cfg).implement("p", cwd=str(tmp_path), timeout_seconds=5)
@@ -245,7 +245,7 @@ def test_codex_prefers_last_message_file(cfg, tmp_path, monkeypatch):
         return _completed(stdout=_CODEX_EVENTS)
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
 
     result = CodexRunner(cfg).implement("p", cwd=str(tmp_path))
     assert result.output == "from the file"

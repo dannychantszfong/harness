@@ -8,7 +8,13 @@ from rich.panel import Panel
 from rich.table import Table
 from pathlib import Path
 
-from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile, check_env_secrets
+from harness.config import (
+    CONFIG_FILENAME,
+    HarnessConfig,
+    RunnerProfile,
+    check_env_secrets,
+    check_url_credentials,
+)
 from harness.orchestrator import Orchestrator
 from harness.progress.models import FeatureStatus
 from harness.progress.tracker import ProgressTracker, usage_summary
@@ -194,6 +200,10 @@ def _normalize_project_git_inputs(
         github_repo = repo
     if git_remote:
         git_remote = git_remote.strip()
+        try:
+            check_url_credentials(git_remote, "--git-remote")
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
     return github_repo, git_remote
 
 
@@ -842,6 +852,7 @@ def run(config_file: str, runner: str | None, model: str | None):
     if runner is None:
         _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
+    _save_project_config(config, Path(config_file))
 
     console.print(
         Panel(
@@ -1023,6 +1034,29 @@ def _load_config_file(path: str | Path, *, pin_project_dir: bool = True) -> Harn
     except (OSError, ValueError) as exc:
         console.print(Panel(str(exc), title=f"[red]Cannot read config: {path}[/red]", border_style="red"))
         raise SystemExit(1)
+
+
+def _save_project_config(config: HarnessConfig, source: Path) -> None:
+    """Keep <output_dir>/harness_config.json in step with an external config.
+
+    `harness resume <dir>` and the auto-resume job both read the project's
+    own harness_config.json; a project started from examples/*.yaml would
+    otherwise have none and could never resume.
+    """
+    target = HarnessConfig.default_config_path(config.output_dir)
+    if source.resolve() == target.resolve():
+        return
+    if target.exists() and "project_id" not in config.model_fields_set:
+        try:  # keep the project's identity across `harness run` invocations
+            config.project_id = HarnessConfig.from_file(target).project_id
+        except Exception:
+            pass
+    try:
+        config.save_file(target)
+    except (OSError, ValueError) as exc:
+        console.print(f"[yellow]Could not write {target}: {exc}[/yellow]")
+        return
+    console.print(f"[dim]Project config saved to {target} — resume with `harness resume {target.parent}`[/dim]")
 
 
 def _run_orchestrator(orchestrator: Orchestrator, **kwargs) -> None:

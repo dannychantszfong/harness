@@ -326,7 +326,7 @@ Jira or any external backlog as source of truth · orchestrator / coder role spl
 
 ## 9. Implementation record (2026-10-11)
 
-Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Harness 2.0), `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`. Suite: 333 passed, 3 skipped (macOS-only launchd tests and the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`.
+Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Harness 2.0), `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`. Suite: 360 passed, 3 skipped (macOS-only launchd tests and the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`.
 
 **Scope notes**
 
@@ -335,6 +335,8 @@ Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Har
 - C-08: Task Scheduler validated on a real Windows host (runbook "Auto-resume backends"); systemd has **not** run on a real Linux host and stays experimental; launchd was not re-run on a real Mac in this pass (its Darwin-only tests run in CI on macOS).
 - Found and fixed along the way: Windows `.cmd` shims not found by bare name (`codex`, `npm`); Rich swallowing `[f1]` in `status`; git operations that could hit a *parent* repo when a project's own `git init` failed (now restricted to the project's repo root); scheduler wrappers lacking `PATH`; `schtasks /SD` depending on the system locale; BOM-less PowerShell wrappers mangling non-ASCII paths.
 - Verified against the installed CLIs: `claude` 2.1.296 (stdin prompt, `--output-format json` shape, `--permission-mode dontAsk` + `--allowedTools` enforcement) and `codex-cli` 0.160 (`exec -`, `--json` events, `--output-last-message`, `--sandbox read-only`).
+
+**Review pass.** An independent review of the diff found 12 issues, all fixed with regression tests (`tests/test_review_fixes.py`): the exhausted-attempt follow-up commit could stage files the attempt had git-ignored (e.g. `.env`); a stale base commit could revert another feature's passing commit; wildcard git rules let read-only sessions write files (`git log --output=`); agents could loosen grading via `harness_config.json`; config reloads dropped `--runner`/`--model` overrides; timeouts did not kill process trees behind Windows `.cmd` shims; SDK rate-limit detection scanned the transcript; malformed api-mode tool input crashed the run; an evaluator outage burned every budget and reverted ungraded work; typographic apostrophes broke the PowerShell wrapper; credentials in git remotes / CLI args were not caught; `harness run file.yaml` left no resumable project config (pre-existing).
 
 **Definition of Done (§5)**
 

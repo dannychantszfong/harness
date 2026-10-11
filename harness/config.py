@@ -6,6 +6,7 @@ import re
 import uuid
 import yaml
 from pathlib import Path
+from urllib.parse import urlsplit
 
 CONFIG_FILENAME = "harness_config.json"
 
@@ -39,6 +40,39 @@ def check_env_secrets(env: dict[str, str], where: str) -> None:
     for key, value in (env or {}).items():
         if looks_like_secret_key(key) and value and not is_env_reference(str(value)):
             raise _literal_secret_error(f"{where}[{key!r}]", key.upper())
+
+
+_SECRET_FLAG_RE = re.compile(r"^--?[\w-]*(?:key|token|secret|password)[\w-]*$", re.IGNORECASE)
+
+
+def check_arg_secrets(args: list[str], where: str) -> None:
+    """Reject `--api-key sk-…` / `--token=…` style literals in CLI args.
+
+    Extra args are passed to the agent CLI verbatim (no $VAR expansion), so
+    the fix is to move the secret into an env var.
+    """
+    for i, arg in enumerate(args or []):
+        flag, eq, inline = str(arg).partition("=")
+        if not _SECRET_FLAG_RE.match(flag):
+            continue
+        value = inline if eq else (str(args[i + 1]) if i + 1 < len(args) else "")
+        if value and not value.startswith("-"):
+            raise ValueError(
+                f"{where} passes a secret on the command line ({flag} …). Put it in an "
+                f"environment variable instead — {CONFIG_FILENAME} is committed to the project repo."
+            )
+
+
+def check_url_credentials(url: Optional[str], where: str) -> None:
+    """Reject http(s) remotes with embedded credentials (https://token@host/...)."""
+    if not url:
+        return
+    parsed = urlsplit(url)
+    if parsed.scheme in ("http", "https") and (parsed.username or parsed.password):
+        raise ValueError(
+            f"{where} embeds credentials in the URL. Use a plain URL and let "
+            "`gh auth` or a git credential helper supply them."
+        )
 
 
 class EvaluatorWeights(BaseModel):
@@ -78,6 +112,12 @@ class RunnerProfile(BaseModel):
     def _env_secrets_are_references(cls, env: dict[str, str]) -> dict[str, str]:
         check_env_secrets(env, "runner profile env")
         return env
+
+    @field_validator("extra_args")
+    @classmethod
+    def _no_secret_args(cls, args: list[str]) -> list[str]:
+        check_arg_secrets(args, "runner profile extra_args")
+        return args
 
 
 class HarnessConfig(BaseModel):
@@ -285,6 +325,8 @@ class HarnessConfig(BaseModel):
     @model_validator(mode="after")
     def _runner_env_secrets_are_references(self) -> "HarnessConfig":
         check_env_secrets(self.active_runner_env, "active_runner_env")
+        check_arg_secrets(self.code_runner_extra_args, "code_runner_extra_args")
+        check_url_credentials(self.project_git_remote, "project_git_remote")
         return self
 
     @model_validator(mode="after")
@@ -301,8 +343,11 @@ class HarnessConfig(BaseModel):
             if value and not is_env_reference(value):
                 raise _literal_secret_error(name, name.upper())
         check_env_secrets(self.active_runner_env, "active_runner_env")
+        check_arg_secrets(self.code_runner_extra_args, "code_runner_extra_args")
+        check_url_credentials(self.project_git_remote, "project_git_remote")
         for profile in self.runner_profiles:
             check_env_secrets(profile.env, f"runner profile {profile.name!r} env")
+            check_arg_secrets(profile.extra_args, f"runner profile {profile.name!r} extra_args")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "HarnessConfig":

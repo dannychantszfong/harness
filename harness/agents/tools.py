@@ -20,11 +20,12 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from harness.runners.base import kill_process_tree
 
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
@@ -36,6 +37,17 @@ _MAX_LIST_ENTRIES = 400
 _MAX_SEARCH_HITS = 200
 _MAX_SEARCH_FILE_BYTES = 1_000_000
 _GIT_SUBCOMMANDS = ("diff", "log", "status", "show")
+# git options that write files, read outside the repository, or run
+# programs — refused whatever the subcommand (prefix match). `-O<file>`
+# (diff order file) reads an arbitrary path.
+_GIT_FORBIDDEN_LONG_OPTIONS = (
+    "--output", "--no-index", "--ext-diff", "--textconv", "--exec",
+    "--git-dir", "--work-tree", "--upload-pack", "--config",
+)
+# Repo config could name an external diff or textconv program.
+_GIT_SAFETY_ARGS = {"diff": ["--no-ext-diff", "--no-textconv"],
+                    "log": ["--no-ext-diff", "--no-textconv"],
+                    "show": ["--no-ext-diff", "--no-textconv"]}
 # Shell metacharacters are refused outright: commands run without a shell,
 # so they could only be an attempt to smuggle a second command.
 _SHELL_META = re.compile(r"[;&|<>`$\n\r]")
@@ -112,7 +124,10 @@ class ProjectTools:
         return [c.strip() for c in (startup, test) if c and c.strip()]
 
     def execute(self, name: str, tool_input: dict[str, Any] | None) -> str:
-        tool_input = tool_input or {}
+        """Run one tool call. Never raises: every problem is the tool's answer,
+        so a malformed call from the model cannot end the run."""
+        if not isinstance(tool_input, dict):
+            tool_input = {}
         try:
             if name == "read_file":
                 return self.read_file(tool_input.get("path", ""), tool_input.get("offset"), tool_input.get("limit"))
@@ -124,6 +139,8 @@ class ProjectTools:
                 return self.run_command(tool_input.get("command", ""))
         except ToolError as exc:
             return f"ERROR: {exc}"
+        except (ValueError, TypeError, OSError, RecursionError) as exc:
+            return f"ERROR: {type(exc).__name__}: {exc}"
         return f"ERROR: unknown tool {name!r}"
 
     # ── tools ───────────────────────────────────────────────────────────
@@ -191,12 +208,16 @@ class ProjectTools:
 
     def run_command(self, command: str) -> str:
         command = (command or "").strip()
-        self._allowed_argv(command)  # raises if not allow-listed
+        argv = self._allowed_argv(command)  # raises if not allow-listed
+        if argv is not None:
+            command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
         return _run_bounded(command, self.root, self.command_timeout)
 
     # ── helpers ─────────────────────────────────────────────────────────
 
-    def _allowed_argv(self, command: str) -> list[str]:
+    def _allowed_argv(self, command: str) -> list[str] | None:
+        """None for an exact allow-listed command line; the (hardened) argv
+        for a git inspection command; ToolError for anything else."""
         if not command:
             raise ToolError("command is required")
         allowed = self.allowed_commands()
@@ -210,8 +231,12 @@ class ProjectTools:
                     f"command not allowed. Allowed: {listed}, "
                     f"and git {'/'.join(_GIT_SUBCOMMANDS)} with arguments"
                 )
-            return argv
-        return _split(command)
+            for arg in argv[2:]:
+                bare = arg.strip("\"'")
+                if bare.startswith("-O") or bare.startswith(_GIT_FORBIDDEN_LONG_OPTIONS):
+                    raise ToolError(f"git option {bare.split('=')[0]} is not allowed")
+            return [argv[0], argv[1], *_GIT_SAFETY_ARGS.get(argv[1], []), *argv[2:]]
+        return None  # an exact allow-listed command line, run as written
 
     def _resolve(self, path: str) -> Path:
         candidate = (self.root / (path or ".")).resolve()
@@ -262,10 +287,8 @@ def _run_bounded(command: str, cwd: Path, timeout: int) -> str:
     the startup script would otherwise hold the pipe open after the kill.
     """
     popen_kwargs: dict[str, Any] = {}
-    if os.name == "nt":
-        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        popen_kwargs["start_new_session"] = True
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True  # killpg on timeout
     args = _popen_args(command)
     with tempfile.TemporaryFile() as out:
         try:
@@ -278,7 +301,7 @@ def _run_bounded(command: str, cwd: Path, timeout: int) -> str:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            _kill_tree(proc)
+            kill_process_tree(proc)
         out.seek(0)
         output = out.read().decode("utf-8", errors="replace")
     if len(output) > _MAX_OUTPUT_CHARS:
@@ -288,17 +311,3 @@ def _run_bounded(command: str, cwd: Path, timeout: int) -> str:
         if timed_out else f"exit code {proc.returncode}"
     )
     return f"{status}\n{output}"
-
-
-def _kill_tree(proc: subprocess.Popen) -> None:
-    try:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
-        pass
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()

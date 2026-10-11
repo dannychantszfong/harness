@@ -357,6 +357,14 @@ working tree and the next feature started on a broken baseline.
      features with their notes and branch.
 - Git operations run only when the project directory is the root of its
   own repository — never on a parent repo.
+- The base is kept only when a feature continues directly after an
+  interruption; any other restart records HEAD as the new base. A reset
+  that would remove another feature's recovery commit is skipped (the
+  attempt's code stays in place, and is still preserved on its branch).
+- Untracked files the attempt had git-ignored are not deleted; paths the
+  base no longer ignores go to `.git/info/exclude`, and the follow-up
+  commit stages only Harness's own files, so nothing the attempt left
+  behind (e.g. `.env`) is committed or pushed.
 
 ### Rationale
 "Revert to the last stable state, but keep the failed attempt for later
@@ -404,3 +412,7 @@ of it, in both orchestration modes.
 - API-mode evaluations cost more tokens (bounded by `api_tool_rounds`).
 - Commands that need a shell (pipes, `&&`) are refused; put them in the
   startup script or the test command.
+- git options that write files or reach outside the repository
+  (`--output`, `--no-index`, `-O<file>`, `--ext-diff`, …) are refused, and
+  diff/log/show always run with `--no-ext-diff --no-textconv`. Runner-mode
+  read-only sessions allow only exact git invocations for the same reason.

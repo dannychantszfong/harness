@@ -111,7 +111,8 @@ _SPRINT_CONTRACT_TOOL = {
 HARNESS_STATE_FILES_NOTE = (
     "Do not create, edit or delete Harness's state files — features.json, "
     "progress.md, harness_config.json, handoff_session_*.json and anything "
-    "under .harness/. Harness updates them itself; changes are reverted."
+    "under .harness/. Harness owns them: changes to features.json and to the "
+    "grading or permission settings in harness_config.json are reverted."
 )
 
 

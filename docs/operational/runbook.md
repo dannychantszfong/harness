@@ -354,7 +354,10 @@ harness resume output/<project_dir>
 `harness/attempt/<feature-id>/<n>`, wrote
 `.harness/attempts/<feature-id>.md` (scores, feedback, weakest dimension,
 last self-evaluation), and reset the working branch to the commit the
-feature started from (ADR-015). Other features continued.  
+feature started from (ADR-015) — unless that would remove another
+feature's recovery commit, in which case the code stays in place. Files the
+attempt had git-ignored stay on disk, listed in `.git/info/exclude`. Other
+features continued.  
 **Fix:** read the notes; then either raise `max_iterations_per_feature` or
 sharpen the feature's description in `features.json` while Harness is not
 running, and `harness resume`. The retry gets the notes as lessons. To look
@@ -363,16 +366,29 @@ at the old code: `git -C output/<project_dir> diff main harness/attempt/<id>/1`.
 ---
 
 ### INC-15: "An agent modified features.json … restored Harness's copy"
-**Cause:** a generator/evaluator session edited Harness's state file.  
+**Cause:** a generator/evaluator session edited Harness's state file (or the
+grading/permission settings in `harness_config.json` — edit those while
+Harness is stopped).  
 **What Harness did:** restored the snapshot taken before that session
 (C-10). Nothing to fix; if it keeps happening, check the project's own
 scripts don't write `features.json`.
 
 ---
 
+### INC-17: "Stopped — evaluator unavailable"
+**Cause:** the evaluator's runner failed twice in a row (expired sign-in,
+missing binary on the evaluator's profile, crash).  
+**What Harness did:** stopped without counting the iteration, so no
+feature's budget was spent and nothing was reverted.  
+**Fix:** fix the evaluator's runner, then `harness resume output/<project_dir>`.
+
+---
+
 ### INC-16: Config fails to load — "holds a literal secret"
 **Cause:** an API-key field or a secret-looking env value
-(`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) in `harness_config.json` or
+(`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), a `--api-key …`-style extra
+argument, or a git remote with embedded credentials
+(`https://<token>@github.com/…`) in `harness_config.json` or
 `~/.harness/setup.json` contains the secret itself. These files are
 committed / copied into project repos.  
 **Fix:** replace the value with an environment reference, e.g.

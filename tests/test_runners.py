@@ -87,7 +87,7 @@ def test_subprocess_nonzero_exit(tmp_config, monkeypatch):
     mock_result.stdout = ""
     mock_result.stderr = "some error"
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -105,7 +105,7 @@ def test_subprocess_rate_limit_detected(tmp_config, monkeypatch):
     mock_result.stdout = "You've hit your limit · resets 9:30pm (Europe/London)"
     mock_result.stderr = ""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -124,7 +124,7 @@ def test_subprocess_rate_limited_flag_without_reset_time(tmp_config, monkeypatch
     mock_result.stdout = ""
     mock_result.stderr = "HTTP 429: too many requests, please slow down"
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -136,7 +136,7 @@ def test_subprocess_rate_limited_flag_without_reset_time(tmp_config, monkeypatch
 def test_subprocess_timeout(tmp_config, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     monkeypatch.setattr(
-        "subprocess.run",
+        "harness.runners.base.run_process",
         MagicMock(side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)),
     )
     runner = SubprocessRunner(tmp_config)
@@ -151,7 +151,7 @@ def test_subprocess_success(tmp_config, monkeypatch):
     mock_result.stdout = "self-evaluation text"
     mock_result.stderr = ""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -172,7 +172,7 @@ def test_subprocess_passes_configured_model(tmp_config, monkeypatch):
         return mock_result
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -198,7 +198,7 @@ def test_subprocess_expands_profile_env(tmp_config, monkeypatch):
         return mock_result
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
 
     result = SubprocessRunner(tmp_config).implement("prompt", cwd="/tmp")
 
@@ -213,7 +213,7 @@ def test_subprocess_no_token_data(tmp_config, monkeypatch):
     mock_result.stdout = "self-evaluation text"
     mock_result.stderr = ""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = SubprocessRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -379,7 +379,7 @@ def test_codex_nonzero_exit(tmp_config, monkeypatch):
     mock_result.stdout = ""
     mock_result.stderr = "codex error"
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = CodexRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -392,7 +392,7 @@ def test_codex_rate_limit_hint_sets_flag(tmp_config, monkeypatch):
     mock_result.stdout = ""
     mock_result.stderr = "429 rate limit exceeded"
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     result = CodexRunner(tmp_config).implement("prompt", cwd="/tmp")
 
@@ -412,7 +412,7 @@ def test_codex_rate_limit_parses_reset_time_when_present(tmp_config, monkeypatch
     mock_result.stdout = "You've hit your limit · resets 9:30pm (Europe/London)"
     mock_result.stderr = ""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     result = CodexRunner(tmp_config).implement("prompt", cwd="/tmp")
 
@@ -428,7 +428,7 @@ def test_codex_success(tmp_config, monkeypatch):
     mock_result.stdout = "codex output"
     mock_result.stderr = ""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: mock_result)
+    monkeypatch.setattr("harness.runners.base.run_process", lambda *a, **k: mock_result)
 
     runner = CodexRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")
@@ -450,7 +450,7 @@ def test_codex_passes_model_and_local_provider(tmp_config, monkeypatch):
         return mock_result
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
 
     runner = CodexRunner(tmp_config)
     result = runner.implement("prompt", cwd="/tmp")

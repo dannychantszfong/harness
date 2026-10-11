@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from rich.console import Console
 
+from harness.runners import base as runner_base
 from harness.runners._rate_limit import classify_failure, failure_haystack
 from harness.runners.base import (
     CodeRunner,
@@ -156,15 +157,12 @@ class SubprocessRunner(CodeRunner):
         cmd = [binary, *self.build_command(access)[1:]]
         try:
             with QuietAnimator.from_config(self.config, phase="coding"):
-                result = subprocess.run(
+                # Kills the whole process tree on timeout (npm shims on Windows).
+                result = runner_base.run_process(
                     cmd,
                     cwd=cwd,
                     env=self.subprocess_env(),
                     input=prompt,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
                     timeout=timeout_seconds,
                 )
         except subprocess.TimeoutExpired:

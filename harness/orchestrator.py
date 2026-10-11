@@ -42,10 +42,14 @@ from harness.progress.models import EvaluationResult, FeatureStatus, ProjectProg
 from harness.project_git import (
     ProjectGitConfigurationError,
     commit_all,
+    commit_paths,
     create_branch,
     ensure_project_gitignore,
     git_head,
+    ignored_untracked_paths,
+    is_ancestor,
     is_git_repo,
+    keep_excluded,
     reset_hard,
     sync_project_git,
 )
@@ -56,6 +60,10 @@ from harness.runner_profiles import (
 from harness.session.opener import SessionOpener
 
 console = Console()
+
+
+class EvaluatorUnavailableError(RuntimeError):
+    """The evaluator session failed (not a parse problem) even after a retry."""
 
 
 class Orchestrator:
@@ -118,6 +126,15 @@ class Orchestrator:
         self._config_mtime = (
             self._config_path.stat().st_mtime if self._config_path.exists() else 0.0
         )
+        # What the file said when last read: reloads apply only fields that
+        # changed on disk, so in-memory overrides (--runner, --model, setup
+        # defaults) survive rewrites of the file that did not touch them.
+        self._disk_config: HarnessConfig | None = None
+        if self._config_path.exists():
+            try:
+                self._disk_config = HarnessConfig.from_file(self._config_path)
+            except Exception:
+                self._disk_config = None
         # Resolve runner: explicit arg > config value > default (subprocess)
         _rt = runner_type or RunnerType(config.code_runner or "subprocess")
         self.runner = create_runner(_rt, config)
@@ -176,6 +193,18 @@ class Orchestrator:
             self._feature_loop(progress)
         except RunnerRateLimitedError as exc:
             self._handle_rate_limit(exc)
+            return
+        except EvaluatorUnavailableError as exc:
+            console.print(
+                Panel(
+                    f"The evaluator failed twice in a row, so this iteration was not graded "
+                    f"or counted.\n\n{str(exc)[:1500]}\n\n"
+                    "Fix the evaluator's runner (sign-in, binary, profile), then run:\n"
+                    f"  [bold]harness resume {self.config.output_dir}[/bold]",
+                    title="[red]Stopped — evaluator unavailable[/red]",
+                    border_style="red",
+                )
+            )
             return
 
         # Reload final state from disk — _feature_loop mutates progress internally
@@ -431,9 +460,15 @@ class Orchestrator:
             )
             console.print(f"\n[bold]Feature:[/bold] {escape(f'{feature.name} [{feature.id}]')}{suffix}")
 
-            # Mark in progress; remember the pre-feature commit (ADR-015).
+            # Mark in progress; remember the pre-feature commit (ADR-015). The
+            # old base only survives a direct continuation of this feature;
+            # if anything else ran since, HEAD now holds other features'
+            # work and is the new base.
             progress = self.tracker.mark_in_progress(
-                progress, feature.id, base_commit_sha=git_head(project_dir),
+                progress,
+                feature.id,
+                base_commit_sha=git_head(project_dir),
+                fresh_base=progress.current_feature_id != feature.id,
             )
             feature = progress.get_feature(feature.id)
 
@@ -557,6 +592,12 @@ class Orchestrator:
                     eval_agent = eval_holder.get("agent")
                     if eval_agent is not None:
                         progress = self._account_usage(progress, eval_agent, feature.id)
+                    if result.parse_failed and result.failure_reason == "evaluator_error":
+                        # The evaluator runtime itself is down (auth, binary,
+                        # crash). Counting this would burn every feature's
+                        # budget and revert work nobody graded — stop instead;
+                        # the feature stays in progress for `harness resume`.
+                        raise EvaluatorUnavailableError(result.feedback)
 
                 self._print_eval_summary(result)
 
@@ -678,7 +719,9 @@ class Orchestrator:
         2. write .harness/attempts/<id>.md (scores, feedback, pattern, branch)
         3. git reset --hard <base_commit_sha> on the working branch — Harness
            state files are snapshotted first and restored afterwards, so the
-           run's progress survives the reset
+           run's progress survives the reset. Never across another feature's
+           recovery point; files the attempt's .gitignore excluded are kept
+           out of git (.git/info/exclude), not deleted.
         """
         feature = progress.get_feature(feature_id)
         project_dir = Path(self.config.output_dir)
@@ -687,10 +730,13 @@ class Orchestrator:
         branch: str | None = None
         attempt_commit: str | None = None
         reverted = False
+        kept_out: list[str] = []
+        skipped_reason: str | None = None
 
         if is_git_repo(project_dir):
             snapshot = self._snapshot_state_files()
             try:
+                ignored_before = ignored_untracked_paths(project_dir)
                 attempt_commit = commit_all(
                     project_dir,
                     f"wip({feature.id}): exhausted attempt {attempt_number} (preserved by Harness)",
@@ -699,13 +745,18 @@ class Orchestrator:
                     branch = f"harness/attempt/{feature.id}/{attempt_number}"
                     create_branch(project_dir, branch, attempt_commit)
                     if base:
-                        reset_hard(project_dir, base)
-                        reverted = True
+                        skipped_reason = self._revert_blocker(progress, feature.id, base, attempt_commit)
+                        if skipped_reason is None:
+                            reset_hard(project_dir, base)
+                            reverted = True
+                            kept_out = keep_excluded(project_dir, ignored_before)
             except (subprocess.CalledProcessError, OSError) as exc:
                 detail = getattr(exc, "stderr", None) or str(exc)
                 console.print(f"  [yellow]Could not preserve/revert the attempt: {detail}[/yellow]")
             finally:
                 self._restore_state_files(snapshot)
+                # The base commit may predate Harness's ignore entries.
+                ensure_project_gitignore(project_dir)
 
         notes = write_attempt_notes(
             project_dir,
@@ -719,9 +770,12 @@ class Orchestrator:
         )
         progress = self.tracker.record_exhausted_attempt(progress, feature.id, branch)
         if reverted:
+            # Only Harness's own files: `git add -A` here would sweep up
+            # whatever the reverted attempt left on disk.
             try:
-                commit_all(
+                commit_paths(
                     project_dir,
+                    self._state_relpaths() + [".gitignore"],
                     f"chore(harness): record exhausted attempt {attempt_number} of {feature.id}",
                 )
             except (subprocess.CalledProcessError, OSError):
@@ -731,10 +785,52 @@ class Orchestrator:
         if branch:
             lines.append(f"Attempt preserved on branch [bold]{branch}[/bold].")
         if reverted:
-            lines.append(f"Working branch reverted to {base[:10]} — the next feature starts clean.")
+            lines.append(
+                f"Tracked files reverted to {base[:10]} — the next feature starts from "
+                "the last stable state."
+            )
+        if kept_out:
+            lines.append(
+                f"{len(kept_out)} untracked path(s) the attempt had git-ignored stay on disk, "
+                "excluded via .git/info/exclude: " + ", ".join(kept_out[:5])
+                + (" …" if len(kept_out) > 5 else "")
+            )
+        if skipped_reason:
+            lines.append(f"[yellow]Not reverted:[/yellow] {skipped_reason}")
         lines.append(f"Notes for the next attempt: {notes.relative_to(project_dir).as_posix()}")
         console.print(Panel("\n".join(lines), title="[yellow]Feature exhausted[/yellow]", border_style="yellow"))
         return progress
+
+    def _revert_blocker(
+        self,
+        progress: ProjectProgress,
+        feature_id: str,
+        base: str,
+        head: str,
+    ) -> str | None:
+        """Why resetting to `base` would be unsafe, or None if it is safe.
+
+        A base recorded before other features passed (a resumed feature,
+        a raised budget) would take their recovery commits off the working
+        branch. Those stay on the attempt branch, but a passing feature must
+        not disappear from main.
+        """
+        project_dir = Path(self.config.output_dir)
+        for other in progress.features:
+            if other.id == feature_id or not other.commit_sha:
+                continue
+            if is_ancestor(project_dir, other.commit_sha, head) and not is_ancestor(
+                project_dir, other.commit_sha, base
+            ):
+                return (
+                    f"feature {other.id} passed after this attempt began; resetting to "
+                    f"{base[:10]} would remove its commit. The attempt's code stays in place."
+                )
+        return None
+
+    def _state_relpaths(self) -> list[str]:
+        root = Path(self.config.output_dir)
+        return [p.relative_to(root).as_posix() for p in self._state_files()]
 
     def _state_files(self) -> list[Path]:
         """Harness-owned files that must survive a `git reset --hard`."""
@@ -810,10 +906,18 @@ class Orchestrator:
             )
             return {}
 
+        # Only fields the file itself changed: a rewrite that leaves a field
+        # alone (state restore, another field edited) must not undo an
+        # in-memory override such as `resume --runner codex --model X`.
+        previous_disk = self._disk_config or self.config
+        self._disk_config = fresh
+
         changes: dict[str, tuple] = {}
         for field in self._LIVE_RELOAD_FIELDS:
-            old = getattr(self.config, field)
             new = getattr(fresh, field)
+            if getattr(previous_disk, field) == new:
+                continue
+            old = getattr(self.config, field)
             if old != new:
                 setattr(self.config, field, new)
                 changes[field] = (old, new)
@@ -829,7 +933,9 @@ class Orchestrator:
                 )
             ):
                 self._role_profile_index.clear()
-                self._role_runner_cache.clear()
+            # Profile runners hold a copy of the config (config_for_profile);
+            # rebuild them so timeouts, models and extra args take effect.
+            self._role_runner_cache.clear()
             lines = [f"[cyan]{CONFIG_FILENAME} changed — applying live:[/cyan]"]
             for field, (old, new) in changes.items():
                 lines.append(f"  [dim]{field}:[/dim] {old} → [bold]{new}[/bold]")

@@ -490,8 +490,13 @@ def _powershell() -> str | None:
     return shutil.which("powershell") or shutil.which("pwsh")
 
 
+# PowerShell ends a single-quoted string at ' and at the typographic quotes
+# U+2018–U+201B; each is escaped by doubling it.
+_PS_SINGLE_QUOTES = "'‘’‚‛"
+
+
 def _ps_quote(value: str) -> str:
-    return value.replace("'", "''")
+    return "".join(c + c if c in _PS_SINGLE_QUOTES else c for c in value)
 
 
 # ── shared helpers ───────────────────────────────────────────────────────────

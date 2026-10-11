@@ -139,7 +139,7 @@ Four dimensions, each scored 1–10: design quality, originality, craft, functio
 
 The weights in the evaluator's prompt are the configured ones. Out-of-range scores are clamped to 1–10. If the evaluator's answer cannot be read, that is recorded as an explicit "no usable grade" (never a silent 5.0), and Harness asks once more before counting the iteration.
 
-**When a feature cannot pass.** After the budget is used up, Harness commits the attempt onto `harness/attempt/<feature-id>/<n>` and writes `.harness/attempts/<feature-id>.md` (every score, all feedback, the weakest dimension, the generator's last self-evaluation). It then resets the working branch to the commit the feature started from, so the next feature builds on a passing baseline. The final panel, `progress.md` and `harness status` list exhausted features. Raise `max_iterations_per_feature` or edit the feature's description, then run `harness resume`: the retry gets the notes injected as lessons.
+**When a feature cannot pass.** After the budget is used up, Harness commits the attempt onto `harness/attempt/<feature-id>/<n>` and writes `.harness/attempts/<feature-id>.md` (every score, all feedback, the weakest dimension, the generator's last self-evaluation). It then resets the tracked files to the commit the feature started from, so the next feature builds on a passing baseline. It never resets across another feature's recovery commit (a resumed feature whose base predates other passing work keeps its code in place instead), and untracked files the attempt had git-ignored (`node_modules/`, `.env`) stay on disk but are kept out of git via `.git/info/exclude`. The final panel, `progress.md` and `harness status` list exhausted features. Raise `max_iterations_per_feature` or edit the feature's description, then run `harness resume`: the retry gets the notes injected as lessons.
 
 ---
 
@@ -156,7 +156,8 @@ harness resume output/my_app_a3f8c21b      # works from any directory
 | Killed mid-feature | the interrupted feature resumes first, with its last evaluator feedback |
 | Feature failed, budget left | retried, continuing its iteration count |
 | `features.json` corrupt | copied to `features.json.corrupt-<timestamp>`; the run stops and nothing is overwritten |
-| An agent edits `features.json` | restored from Harness's copy, with a warning |
+| An agent edits `features.json` or the grading/permission settings in `harness_config.json` | restored from Harness's copy, with a warning |
+| The evaluator's runner keeps failing (sign-in, missing binary) | the run stops after one retry, without counting the iteration; fix it and `harness resume` |
 | Usage cap with a reset time | a one-shot OS job runs `harness resume <dir>` after the reset (`auto_resume_on_rate_limit`) |
 
 Auto-resume backends: **macOS launchd**; **Windows Task Scheduler** (validated on a real host); **Linux systemd user timer** (experimental, needs a user D-Bus session; Harness says so instead of failing silently). The scheduled wrappers carry the `PATH` from scheduling time, never secrets. See the [runbook](docs/operational/runbook.md#auto-resume-backends).
@@ -181,7 +182,7 @@ On a subscription the dollar figure is the runtime's API-price equivalent, not w
 Read this before an unattended run.
 
 - **The generator and initializer run with permissions bypassed** (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`) inside the project directory. They can run any command your user can. For unattended runs, use a container, a VM or a dedicated OS user without access to your other files and credentials.
-- **Planner, evaluator and sprint-contract sessions are read-only** by default (`read_only_roles`): on Claude Code, `--permission-mode dontAsk` with an allow-list (Read/Grep/Glob, plus the startup command, `test_command` and `git diff/log/status/show`) and Write/Edit disallowed; on Codex, `--sandbox read-only`. Tune per role with `role_allowed_tools`.
+- **Planner, evaluator and sprint-contract sessions are read-only** by default (`read_only_roles`): on Claude Code, `--permission-mode dontAsk` with an allow-list (Read/Grep/Glob, the startup command, `test_command`, and a fixed set of exact `git status/diff/log/show` invocations — no wildcard git rules, since `git log --output=<file>` writes files) and Write/Edit disallowed; on Codex, `--sandbox read-only`. Tune per role with `role_allowed_tools`.
 - **No literal secrets in `harness_config.json`.** It is committed to the project repo and may be pushed to GitHub. API-key fields and secret-looking env values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) must be references such as `"$OPENROUTER_API_KEY"`; a literal value is rejected on load and on save.
 - Harness keeps `.auto_resume.*` and `auto_resume.log` out of the project's commits, and git operations only ever run in the project's own repository root.
 
@@ -220,7 +221,7 @@ code_runner: subprocess         # subprocess | sdk | codex
 ```
 
 ```bash
-harness run examples/web_app.yaml
+harness run examples/web_app.yaml   # also writes output/web_app/harness_config.json, so `harness resume output/web_app` works
 ```
 
 All fields, with defaults:

@@ -140,14 +140,21 @@ class ProgressTracker:
 
     @contextmanager
     def protect_state(self) -> Iterator[None]:
-        """Restore features.json if an agent session changed it.
+        """Undo an agent session's edits to Harness state (C-10).
 
         Agents work in the project directory with write access; Harness is
         the only writer of its own state. Snapshot before the call, compare
-        after (also when the call raised), restore the known-good copy.
+        after (also when the call raised):
+        - features.json: any change is reverted;
+        - harness_config.json: reverted when a session changed how agents
+          are graded or what they may do (PROTECTED_CONFIG_FIELDS) — other
+          edits, e.g. a model swap by the user mid-run, are kept for the
+          live reload.
         """
         path = self.config.features_path
+        config_path = HarnessConfig.default_config_path(self.config.output_dir)
         before = path.read_bytes() if path.exists() else None
+        config_before = config_path.read_bytes() if config_path.exists() else None
         try:
             yield
         finally:
@@ -160,6 +167,17 @@ class ProgressTracker:
                         f"(sha256 {_digest(before)} → {_digest(after)}); "
                         "restored Harness's copy.[/yellow]"
                     )
+            if config_before is not None:
+                config_after = config_path.read_bytes() if config_path.exists() else None
+                if config_after != config_before:
+                    touched = _protected_changes(config_before, config_after)
+                    if touched:
+                        write_atomic(config_path, config_before)
+                        console.print(
+                            f"[yellow]⚠  {config_path.name} changed during an agent session "
+                            f"({', '.join(touched)}); restored. Edit grading and permission "
+                            "settings while Harness is stopped.[/yellow]"
+                        )
 
     # ------------------------------------------------------------------
     # Feature mutations
@@ -175,12 +193,14 @@ class ProgressTracker:
         progress: ProjectProgress,
         feature_id: str,
         base_commit_sha: Optional[str] = None,
+        fresh_base: bool = False,
     ) -> ProjectProgress:
+        """fresh_base=False keeps the original pre-feature commit across an
+        interruption of this same feature; True records base_commit_sha anew."""
         feature = self._feature(progress, feature_id)
         feature.status = FeatureStatus.IN_PROGRESS
         feature.last_updated = utcnow()
-        # Keep the original pre-feature state across interruptions/resumes.
-        if feature.base_commit_sha is None and base_commit_sha:
+        if fresh_base or feature.base_commit_sha is None:
             feature.base_commit_sha = base_commit_sha
         progress.current_feature_id = feature_id
         self.save(progress)
@@ -319,6 +339,45 @@ class ProgressTracker:
                 )
 
         write_atomic(self.config.progress_path, "\n".join(lines).encode("utf-8"))
+
+
+# harness_config.json fields an agent session must not change: they decide
+# how work is graded and what agents may run.
+PROTECTED_CONFIG_FIELDS: tuple[str, ...] = (
+    "evaluator_pass_score",
+    "evaluator_weights",
+    "evaluator_functionality_floor",
+    "max_iterations_per_feature",
+    "sprint_contract_enabled",
+    "read_only_roles",
+    "role_allowed_tools",
+    "test_command",
+    "startup_command",
+    "init_script",
+    "init_script_type",
+    "code_runner_extra_args",
+    "active_runner_env",
+    "runner_profiles",
+    "evaluator_browser_verification",
+    "evaluator_mcp_config",
+    "orchestration_mode",
+    "output_dir",
+    "features_file",
+)
+
+
+def _protected_changes(before: bytes, after: Optional[bytes]) -> list[str]:
+    """Protected fields that differ; ['harness_config.json'] if unreadable."""
+    try:
+        old = json.loads(before.decode("utf-8"))
+        new = json.loads(after.decode("utf-8")) if after is not None else None
+    except (ValueError, UnicodeDecodeError):
+        return ["unreadable file"]
+    if not isinstance(new, dict):
+        return ["file replaced or deleted"]
+    if not isinstance(old, dict):
+        return []
+    return [k for k in PROTECTED_CONFIG_FIELDS if old.get(k) != new.get(k)]
 
 
 def usage_summary(tokens: int, cost_usd: float, config: HarnessConfig) -> str:

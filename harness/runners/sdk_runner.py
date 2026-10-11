@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 from rich.console import Console
 
-from harness.runners._rate_limit import classify_failure
+from harness.runners._rate_limit import classify_failure, failure_haystack
 from harness.runners.base import (
     WRITE_TOOLS,
     CodeRunner,
@@ -225,7 +225,12 @@ class SDKRunner(CodeRunner):
             error = f"Claude Code SDK session ended with {subtype}"
             if output:
                 error += f": {output[-1500:]}"
-            reset_at, rate_limited = classify_failure(f"{error}\n{output}")
+            # Classify on the session's own final message only — never on
+            # the transcript fallback, where a generator building a rate
+            # limiter talks about "429" (P-14). No result → not a cap.
+            reset_at, rate_limited = classify_failure(
+                failure_haystack(result_text if isinstance(result_text, str) else "", None)
+            )
             return RunResult(
                 output=output,
                 success=False,

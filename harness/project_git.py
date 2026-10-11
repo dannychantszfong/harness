@@ -123,12 +123,88 @@ def commit_all(project_dir: Path, message: str) -> str | None:
     return git_head(project_dir)
 
 
+def commit_paths(project_dir: Path, paths: list[str], message: str) -> str | None:
+    """Commit only `paths` (relative to the project), if any of them changed.
+
+    Used after a revert, where `git add -A` would sweep up whatever the
+    reverted attempt left on disk.
+    """
+    if not is_git_repo(project_dir):
+        return None
+    existing = [p for p in paths if (Path(project_dir) / p).exists()]
+    if existing:
+        _run(["git", "add", "-A", "--", *existing], cwd=project_dir)
+    staged = _run(["git", "diff", "--cached", "--quiet"], cwd=project_dir, check=False)
+    if staged.returncode == 1:
+        _run(["git", "commit", "-m", message], cwd=project_dir, env=_identity_env(project_dir))
+    return git_head(project_dir)
+
+
 def create_branch(project_dir: Path, name: str, ref: str = "HEAD") -> None:
     _run(["git", "branch", "-f", name, ref], cwd=project_dir)
 
 
 def reset_hard(project_dir: Path, ref: str) -> None:
     _run(["git", "reset", "--hard", ref], cwd=project_dir)
+
+
+def is_ancestor(project_dir: Path, ancestor: str, descendant: str) -> bool:
+    proc = _run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=project_dir,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def ignored_untracked_paths(project_dir: Path) -> list[str]:
+    """Untracked paths the current .gitignore rules exclude (dirs collapsed)."""
+    proc = _run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+        cwd=project_dir,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    return [p for p in proc.stdout.split("\0") if p]
+
+
+def keep_excluded(project_dir: Path, paths: list[str]) -> list[str]:
+    """Keep files out of git after a revert changed the ignore rules.
+
+    `git reset --hard` restores the base .gitignore but leaves ignored,
+    untracked files (node_modules/, .env, build output) on disk; without
+    this they would be swept into the next `git add -A` and pushed. Paths
+    no longer ignored are added to .git/info/exclude — local, never
+    committed, nothing deleted. Returns the paths added.
+    """
+    added: list[str] = []
+    for path in paths:
+        if not (Path(project_dir) / path.rstrip("/")).exists():
+            continue
+        check = _run(["git", "check-ignore", "-q", "--", path], cwd=project_dir, check=False)
+        if check.returncode == 1:  # 1 = not ignored any more
+            added.append(path)
+    if not added:
+        return []
+    exclude_rel = _run(
+        ["git", "rev-parse", "--git-path", "info/exclude"], cwd=project_dir
+    ).stdout.strip()
+    exclude = Path(project_dir) / exclude_rel if not Path(exclude_rel).is_absolute() else Path(exclude_rel)
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+    lines = ["# Left behind by an exhausted Harness attempt"]
+    lines += ["/" + _escape_gitignore(p) for p in added]
+    with open(exclude, "a", encoding="utf-8") as fh:
+        if existing and not existing.endswith("\n"):
+            fh.write("\n")
+        fh.write("\n".join(lines) + "\n")
+    return added
+
+
+def _escape_gitignore(path: str) -> str:
+    escaped = "".join("\\" + c if c in "\\*?[" else c for c in path)
+    return escaped
 
 
 def _identity_env(project_dir: Path) -> dict[str, str] | None:

@@ -29,6 +29,8 @@ from datetime import datetime
 from enum import Enum
 import os
 from pathlib import Path
+import signal
+import subprocess
 from typing import Optional
 
 # Fallback when a config object does not carry runner_timeout_seconds.
@@ -162,18 +164,37 @@ class RunnerAccess:
 WRITE_TOOLS: tuple[str, ...] = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 
+# Exact git invocations for read-only sessions. A wildcard rule such as
+# "Bash(git log *)" would also allow `git log --output=<file>` (a write) or
+# `git diff --no-index <outside file>` (a read outside the project).
+SAFE_GIT_COMMANDS: tuple[str, ...] = (
+    "git status",
+    "git status --short",
+    "git diff",
+    "git diff --stat",
+    "git diff HEAD",
+    "git diff HEAD --stat",
+    "git diff HEAD~1",
+    "git diff HEAD~1 --stat",
+    "git log --oneline -20",
+    "git log --oneline -50",
+    "git log -5 --stat",
+    "git show --stat",
+    "git show HEAD",
+)
+
+
 def default_read_only_tools(config) -> list[str]:
-    """Read/search tools plus allow-listed commands: startup, tests, git diff/log.
+    """Read/search tools plus allow-listed commands: startup, tests, git.
 
     Which of these the agent uses, and in what order, is its own judgement;
     this is only the permission boundary.
     """
     tools = ["Read", "Grep", "Glob", "LS"]
-    commands = ["git diff", "git log", "git status", "git show"]
+    tools += [f"Bash({command})" for command in SAFE_GIT_COMMANDS]
     startup = getattr(config, "startup_command_for_platform", None)
     test = getattr(config, "test_command", None)
-    commands += [c for c in (startup, test) if c]
-    for command in commands:
+    for command in (c for c in (startup, test) if c):
         tools += [f"Bash({command})", f"Bash({command} *)"]
     return tools
 
@@ -282,6 +303,73 @@ class CodeRunner(ABC):
             getattr(self.config, "runner_timeout_seconds", None)
             or DEFAULT_RUNNER_TIMEOUT_SECONDS
         )
+
+
+def kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a child and everything it started.
+
+    Agent CLIs are often shims (`codex.cmd` → node on Windows, a shell
+    wrapper elsewhere): killing only the direct child leaves the real agent
+    running and its pipes open.
+    """
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                capture_output=True,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)  # child leads its own session
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def run_process(
+    cmd: list[str],
+    *,
+    cwd: str,
+    env: Optional[dict[str, str]] = None,
+    input: Optional[str] = None,  # noqa: A002 — mirrors subprocess.run
+    timeout: Optional[float] = None,
+) -> subprocess.CompletedProcess:
+    """subprocess.run(capture_output=True, text=True) that enforces its timeout.
+
+    On timeout (and on Ctrl+C) the whole process tree is killed before
+    TimeoutExpired is raised, so a hung agent behind a shim cannot hang
+    Harness.
+    """
+    popen_kwargs: dict = {} if os.name == "nt" else {"start_new_session": True}
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **popen_kwargs,
+    )
+    try:
+        stdout, stderr = proc.communicate(input, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_process_tree(proc)
+        try:
+            proc.communicate(timeout=10)
+        except (subprocess.TimeoutExpired, ValueError, OSError):
+            pass
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    except BaseException:
+        # e.g. KeyboardInterrupt: a child in its own session does not get
+        # the terminal's SIGINT, so stop it explicitly.
+        kill_process_tree(proc)
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def missing_cwd_result(cwd: str) -> Optional[RunResult]:

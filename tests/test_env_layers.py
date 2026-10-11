@@ -150,7 +150,7 @@ def test_subprocess_runner_picks_up_merged_env(tmp_path, monkeypatch):
         return mock_result
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("harness.runners.base.run_process", fake_run)
 
     SubprocessRunner(cfg).implement("prompt", cwd="/tmp")
     env = captured["env"]
