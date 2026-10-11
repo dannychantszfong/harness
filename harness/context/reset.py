@@ -34,6 +34,7 @@ class ContextReset:
         next_action: str,
         open_questions: list[str] | None = None,
         warnings: list[str] | None = None,
+        feature_id: str | None = None,
     ) -> HandoffDocument:
         handoff = HandoffDocument(
             project_name=progress.project_name,
@@ -49,6 +50,7 @@ class ContextReset:
                 "progress": str(self.config.progress_path),
                 "init_script": str(self.config.init_script_path),
             },
+            feature_id=feature_id,
         )
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -48,9 +48,9 @@ class SessionOpener:
             blocks.append("")
             blocks.append("## First session — no prior handoff")
             blocks.append(
-                f"Read features.json, run `{self.config.startup_command_for_platform}` "
+                f"Read {self.config.features_file}, run `{self.config.startup_command_for_platform}` "
                 "to confirm the app starts, "
-                "then pick the highest-priority pending feature."
+                "then work on the feature named in *Your task* below."
             )
 
         # Git log for situational awareness
@@ -86,9 +86,15 @@ class SessionOpener:
         blocks.append(
             f"3. Run `{self.config.startup_command_for_platform}` — confirm the app starts"
         )
-        blocks.append(f"4. Read `{self.config.features_file}` to understand remaining work")
+        blocks.append(
+            f"4. Read `{self.config.features_file}` to understand remaining work "
+            "(read only — Harness owns this file)"
+        )
         blocks.append("5. Run a quick smoke test in the browser (or via curl)")
-        blocks.append("6. Pick the highest-priority `pending` feature and begin")
+        blocks.append(
+            "6. Work only on the feature named in *Your task* below; "
+            "do not start other features"
+        )
 
         return "\n".join(blocks)
 

@@ -27,6 +27,10 @@ class HandoffDocument:
     warnings: list[str] = field(default_factory=list)
     # Raw path references so the next agent knows where to look
     key_files: dict[str, str] = field(default_factory=dict)
+    # The feature being worked on when the reset happened. A handoff is only
+    # injected while that feature is current (None = written between
+    # features; shown to the next feature only).
+    feature_id: str | None = None
 
     def to_prompt_block(self) -> str:
         """Render the handoff as a prompt-ready context block."""
@@ -69,6 +73,7 @@ class HandoffDocument:
                     "open_questions": self.open_questions,
                     "warnings": self.warnings,
                     "key_files": self.key_files,
+                    "feature_id": self.feature_id,
                 },
                 indent=2,
             )
@@ -80,6 +85,7 @@ class HandoffDocument:
         handoffs = sorted(directory.glob("handoff_session_*.json"))
         if not handoffs:
             return None
-        data = json.loads(handoffs[-1].read_text())
+        data = json.loads(handoffs[-1].read_text(encoding="utf-8"))
         data["completed_at"] = parse_utc(data["completed_at"])
-        return cls(**data)
+        known = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in data.items() if k in known})

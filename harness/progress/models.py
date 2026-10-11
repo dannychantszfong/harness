@@ -1,7 +1,10 @@
-from pydantic import BaseModel, Field
-from typing import Optional
-from harness.timeutil import UTCDateTime, utcnow
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+from harness.timeutil import UTCDateTime, utcnow
 
 
 class FeatureStatus(str, Enum):
@@ -45,6 +48,12 @@ class Feature(BaseModel):
     implementation_notes: Optional[str] = None
     implemented_at: Optional[UTCDateTime] = None
     last_updated: UTCDateTime = Field(default_factory=utcnow)
+    # Git recovery points (ADR-015). base_commit_sha is HEAD when the current
+    # attempt started; commit_sha is the recovery point after it passed.
+    base_commit_sha: Optional[str] = None
+    commit_sha: Optional[str] = None
+    # Branches preserving exhausted attempts: harness/attempt/<id>/<n>.
+    attempt_branches: list[str] = Field(default_factory=list)
 
     @property
     def latest_evaluation(self) -> Optional[EvaluationResult]:
@@ -55,6 +64,20 @@ class Feature(BaseModel):
     @property
     def iteration_count(self) -> int:
         return len(self.evaluation_history)
+
+    def is_exhausted(self, max_iterations: int) -> bool:
+        """Failed and out of iteration budget (derived; status stays FAILING)."""
+        return self.status != FeatureStatus.PASSING and self.iteration_count >= max_iterations
+
+
+@dataclass
+class ResumeSummary:
+    """What a (re)started feature loop will find, for C-09 and the final panel."""
+    passing: list[Feature] = field(default_factory=list)
+    in_progress: list[Feature] = field(default_factory=list)
+    pending: list[Feature] = field(default_factory=list)   # incl. failing with budget left
+    exhausted: list[Feature] = field(default_factory=list)
+    next_feature: Optional[Feature] = None
 
 
 class ProjectProgress(BaseModel):
@@ -97,3 +120,116 @@ class ProjectProgress(BaseModel):
     def next_pending_feature(self) -> Optional[Feature]:
         pending = sorted(self.pending_features, key=lambda f: f.priority)
         return pending[0] if pending else None
+
+    def next_actionable_feature(self, max_iterations: int) -> Optional[Feature]:
+        """The feature the loop should work on next (P-02).
+
+        An interrupted IN_PROGRESS feature resumes first; then PENDING and
+        FAILING features that still have iteration budget, by priority.
+        Exhausted features are never returned.
+        """
+        interrupted = sorted(
+            (
+                f for f in self.features
+                if f.status == FeatureStatus.IN_PROGRESS and not f.is_exhausted(max_iterations)
+            ),
+            key=lambda f: f.priority,
+        )
+        if interrupted:
+            return interrupted[0]
+        queued = sorted(
+            (
+                f for f in self.features
+                if f.status in (FeatureStatus.PENDING, FeatureStatus.FAILING)
+                and not f.is_exhausted(max_iterations)
+            ),
+            key=lambda f: f.priority,
+        )
+        return queued[0] if queued else None
+
+    def exhausted_features(self, max_iterations: int) -> list[Feature]:
+        return [f for f in self.features if f.is_exhausted(max_iterations)]
+
+    def resume_summary(self, max_iterations: int) -> ResumeSummary:
+        summary = ResumeSummary(next_feature=self.next_actionable_feature(max_iterations))
+        for f in sorted(self.features, key=lambda f: f.priority):
+            if f.status == FeatureStatus.PASSING:
+                summary.passing.append(f)
+            elif f.is_exhausted(max_iterations):
+                summary.exhausted.append(f)
+            elif f.status == FeatureStatus.IN_PROGRESS:
+                summary.in_progress.append(f)
+            else:
+                summary.pending.append(f)
+        return summary
+
+
+def dedupe_feature_ids(features: list[Feature]) -> list[tuple[str, str]]:
+    """Rename duplicate ids in place (f1, f1-2, f1-3, …). Returns (old, new) pairs.
+
+    Deterministic: the first occurrence keeps its id, later ones get the
+    lowest free numeric suffix, so get_feature() never hits the wrong entry.
+    """
+    seen: set[str] = set()
+    taken = {f.id for f in features}
+    renames: list[tuple[str, str]] = []
+    for feature in features:
+        if feature.id not in seen:
+            seen.add(feature.id)
+            continue
+        n = 2
+        while f"{feature.id}-{n}" in taken:
+            n += 1
+        new_id = f"{feature.id}-{n}"
+        renames.append((feature.id, new_id))
+        feature.id = new_id
+        taken.add(new_id)
+        seen.add(new_id)
+    return renames
+
+
+def normalize_feature_entries(raw: Any) -> tuple[list[dict], list[str]]:
+    """Validate runner-written feature entries (P-04).
+
+    Accepts a list of dicts (or {"features": [...]}). Each entry needs a
+    name or a description; a missing id becomes f<n>, a missing name or
+    description borrows the other, a bad priority falls back to the list
+    position. Unusable entries are dropped with a warning. Duplicate ids are
+    resolved later by dedupe_feature_ids().
+    """
+    if isinstance(raw, dict) and isinstance(raw.get("features"), list):
+        raw = raw["features"]
+    if not isinstance(raw, list):
+        raise ValueError("feature list must be a JSON array of feature objects")
+
+    entries: list[dict] = []
+    warnings: list[str] = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            warnings.append(f"entry {idx + 1}: not an object — skipped")
+            continue
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or "").strip()
+        if not name and not description:
+            warnings.append(f"entry {idx + 1}: no name or description — skipped")
+            continue
+        feature_id = str(item.get("id") or "").strip()
+        if not feature_id:
+            feature_id = f"f{idx + 1}"
+            warnings.append(f"entry {idx + 1}: missing id — assigned {feature_id}")
+        if not name:
+            name = description[:80]
+            warnings.append(f"{feature_id}: missing name — using the description")
+        if not description:
+            description = name
+            warnings.append(f"{feature_id}: missing description — using the name")
+        try:
+            priority = int(item.get("priority", idx))
+        except (TypeError, ValueError):
+            priority = idx
+            warnings.append(f"{feature_id}: invalid priority {item.get('priority')!r} — using {idx}")
+        entries.append({"id": feature_id, "name": name, "description": description, "priority": priority})
+
+    if not entries:
+        raise ValueError("feature list contains no usable features")
+    return entries, warnings

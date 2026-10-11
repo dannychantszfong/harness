@@ -49,17 +49,39 @@ _SPRINT_CONTRACT_TOOL = {
 }
 
 
+# Files Harness owns. Agents may read them but must never edit them (C-10);
+# Harness restores features.json if a session changes it.
+HARNESS_STATE_FILES_NOTE = (
+    "Do not create, edit or delete Harness's state files — features.json, "
+    "progress.md, harness_config.json, handoff_session_*.json and anything "
+    "under .harness/. Harness updates them itself; changes are reverted."
+)
+
+
 def _build_implementation_prompt(
     feature: Feature,
     session_preamble: str,
     evaluator_feedback: Optional[str],
     iteration: int,
     startup_command: str = "bash init.sh",
+    lessons: Optional[str] = None,
 ) -> str:
     contract_block = ""
     if feature.sprint_contract:
         criteria = "\n".join(f"  - {c}" for c in feature.sprint_contract.acceptance_criteria)
         contract_block = f"\n\n**Sprint contract — acceptance criteria:**\n{criteria}"
+        if feature.sprint_contract.out_of_scope:
+            out = "\n".join(f"  - {c}" for c in feature.sprint_contract.out_of_scope)
+            contract_block += f"\n\n**Out of scope for this feature:**\n{out}"
+
+    lessons_block = ""
+    if lessons:
+        lessons_block = (
+            "\n\n**Lessons from previous attempts at this feature** "
+            "(those attempts ran out of iterations; their code was reverted and "
+            "kept on a branch). Do not repeat what failed:\n\n"
+            f"{lessons}"
+        )
 
     feedback_block = ""
     if evaluator_feedback:
@@ -76,11 +98,13 @@ def _build_implementation_prompt(
         f"`{feature.id}` — **{feature.name}**\n\n"
         f"{feature.description}"
         f"{contract_block}"
+        f"{lessons_block}"
         f"{feedback_block}\n\n"
+        f"{HARNESS_STATE_FILES_NOTE}\n\n"
         "When done:\n"
         f"1. Run `{startup_command}` and confirm the app starts.\n"
         "2. Write a self-evaluation: what you built, edge cases, concerns.\n"
-        "3. git add -A && git commit -m 'feat: <feature name>'\n"
+        "3. Commit your work (Harness also records its own commit when the feature passes).\n"
         "4. Output your self-evaluation as the final message."
     )
 
@@ -145,6 +169,7 @@ class GeneratorAgent(BaseAgent):
         session_preamble: str,
         evaluator_feedback: Optional[str] = None,
         iteration: int = 1,
+        lessons: Optional[str] = None,
     ) -> str:
         """Delegate implementation to the configured CodeRunner."""
         prompt = _build_implementation_prompt(
@@ -153,6 +178,7 @@ class GeneratorAgent(BaseAgent):
             evaluator_feedback=evaluator_feedback,
             iteration=iteration,
             startup_command=self.config.startup_command_for_platform,
+            lessons=lessons,
         )
 
         result: RunResult = self.runner.implement(

@@ -20,6 +20,7 @@ Two failure modes are separated on purpose:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -64,6 +65,85 @@ def ensure_project_gitignore(project_dir: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+# ── Local recovery points (C-02 / ADR-015) ───────────────────────────────────
+#
+# Harness owns one commit per passing feature and, when a feature exhausts its
+# budget, preserves the attempt on a branch before reverting to the feature's
+# base commit. All helpers are no-ops (returning None/False) outside a repo.
+
+_FALLBACK_IDENTITY = {
+    "GIT_AUTHOR_NAME": "Agent Harness",
+    "GIT_AUTHOR_EMAIL": "harness@localhost",
+    "GIT_COMMITTER_NAME": "Agent Harness",
+    "GIT_COMMITTER_EMAIL": "harness@localhost",
+}
+
+
+def is_git_repo(project_dir: Path) -> bool:
+    """True only if project_dir is the *root* of its own work tree.
+
+    Being somewhere inside a work tree is not enough: output/ lives inside
+    the Harness checkout, and a project whose `git init` failed must never
+    have commits — let alone `reset --hard` — applied to the parent repo.
+    """
+    if shutil.which("git") is None or not Path(project_dir).is_dir():
+        return False
+    proc = _run(["git", "rev-parse", "--show-toplevel"], cwd=project_dir, check=False)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return False
+    return Path(proc.stdout.strip()).resolve() == Path(project_dir).resolve()
+
+
+def git_head(project_dir: Path) -> str | None:
+    """Current HEAD sha of the project's own repo, or None."""
+    if not is_git_repo(project_dir):
+        return None
+    proc = _run(["git", "rev-parse", "--verify", "HEAD"], cwd=project_dir, check=False)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def is_dirty(project_dir: Path) -> bool:
+    proc = _run(["git", "status", "--porcelain"], cwd=project_dir, check=False)
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+def commit_all(project_dir: Path, message: str) -> str | None:
+    """`git add -A && git commit -m message` if the tree is dirty.
+
+    Returns HEAD afterwards (the new commit, or the existing HEAD when there
+    was nothing to commit); None when this is not a usable repo.
+    """
+    if not is_git_repo(project_dir):
+        return None
+    if is_dirty(project_dir):
+        _run(["git", "add", "-A"], cwd=project_dir)
+        _run(["git", "commit", "-m", message], cwd=project_dir, env=_identity_env(project_dir))
+    return git_head(project_dir)
+
+
+def create_branch(project_dir: Path, name: str, ref: str = "HEAD") -> None:
+    _run(["git", "branch", "-f", name, ref], cwd=project_dir)
+
+
+def reset_hard(project_dir: Path, ref: str) -> None:
+    _run(["git", "reset", "--hard", ref], cwd=project_dir)
+
+
+def _identity_env(project_dir: Path) -> dict[str, str] | None:
+    """Fallback author/committer when git has no identity configured.
+
+    Without it `git commit` fails on fresh machines and CI runners and the
+    recovery point silently never happens.
+    """
+    email = _run(["git", "config", "user.email"], cwd=project_dir, check=False)
+    if email.returncode == 0 and email.stdout.strip():
+        return None
+    env = os.environ.copy()
+    for key, value in _FALLBACK_IDENTITY.items():
+        env.setdefault(key, value)
+    return env
 
 
 class ProjectGitConfigurationError(Exception):
@@ -221,11 +301,14 @@ def _run(
     *,
     cwd: Path,
     check: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    extra = {"env": env} if env is not None else {}
     return subprocess.run(
         args,
         cwd=cwd,
         capture_output=True,
         text=True,
         check=check,
+        **extra,
     )

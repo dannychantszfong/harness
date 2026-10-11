@@ -16,9 +16,11 @@ The orchestrator is the only component that knows the full picture.
 Individual agents are stateless; all state lives in files on disk.
 """
 
+import subprocess
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from harness.config import CONFIG_FILENAME, HarnessConfig
@@ -28,9 +30,19 @@ from harness.runners.base import RunnerRateLimitedError, RunnerTimeoutError
 from harness import auto_resume
 from harness.context.reset import ContextReset
 from harness.context.handoff import HandoffDocument
-from harness.progress.tracker import ProgressTracker
-from harness.progress.models import ProjectProgress, EvaluationResult
-from harness.project_git import ProjectGitConfigurationError, sync_project_git
+from harness.progress.attempts import read_lessons, write_attempt_notes
+from harness.progress.tracker import ProgressTracker, attempts_file_relpath, write_atomic
+from harness.progress.models import EvaluationResult, FeatureStatus, ProjectProgress
+from harness.project_git import (
+    ProjectGitConfigurationError,
+    commit_all,
+    create_branch,
+    ensure_project_gitignore,
+    git_head,
+    is_git_repo,
+    reset_hard,
+    sync_project_git,
+)
 from harness.runner_profiles import (
     runner_for_profile,
     role_profiles,
@@ -134,6 +146,10 @@ class Orchestrator:
                 self._handle_rate_limit(exc)
             return
 
+        # Keep auto-resume wrappers and logs out of the project's commits
+        # (also for projects created before the initializer wrote this).
+        ensure_project_gitignore(output_dir)
+
         try:
             # Phase 1: Initialize (idempotent — skips if already done)
             progress = self._initialize(confirmed_spec=confirmed_spec)
@@ -150,13 +166,32 @@ class Orchestrator:
 
         # Reload final state from disk — _feature_loop mutates progress internally
         final = self.tracker.load()
-        console.print(
-            Panel(
-                f"[bold green]Done![/bold green] "
-                f"{len(final.passing_features)}/{len(final.features)} features passing.",
-                title="Harness Complete",
+        console.print(self._final_panel(final))
+
+    def _final_panel(self, final: ProjectProgress) -> Panel:
+        passing, total = len(final.passing_features), len(final.features)
+        exhausted = final.exhausted_features(self.config.max_iterations_per_feature)
+        if passing == total:
+            lines = [f"[bold green]Done![/bold green] {passing}/{total} features passing."]
+            title = "Harness Complete"
+        else:
+            lines = [f"[bold yellow]Finished.[/bold yellow] {passing}/{total} features passing."]
+            title = "Harness Finished"
+        if exhausted:
+            lines.append(
+                f"\n[yellow]{len(exhausted)} feature{'s' if len(exhausted) != 1 else ''} "
+                "exhausted retries:[/yellow]"
             )
-        )
+            for f in exhausted:
+                branch = f.attempt_branches[-1] if f.attempt_branches else "no branch"
+                lines.append(
+                    f"  • {f.id} {f.name} — {attempts_file_relpath(f.id)} ({branch})"
+                )
+            lines.append(
+                "\n[dim]Raise max_iterations_per_feature or edit the feature description, "
+                "then `harness resume` to retry them with these notes.[/dim]"
+            )
+        return Panel("\n".join(lines), title=title)
 
     def _review_only(self) -> None:
         """Audit-only path: run ReviewerAgent, write REVIEW.md, exit clean."""
@@ -338,50 +373,77 @@ class Orchestrator:
 
     def _feature_loop(self, progress: ProjectProgress) -> None:
         console.print("\n[bold blue]Phase 3: Feature implementation loop[/bold blue]")
-
-        handoff = HandoffDocument.load_latest(Path(self.config.output_dir))
+        project_dir = Path(self.config.output_dir)
+        # Continue the session numbering of earlier runs so a resumed run's
+        # handoffs never overwrite older ones.
+        self.session_number = max(progress.session_count, 1)
+        # A handoff from an earlier run is only relevant to the feature it was
+        # written for (P-27); _handoff_for() decides per feature.
+        self._handoff = HandoffDocument.load_latest(project_dir)
+        self._handoff_fresh = False
 
         while True:
             # Seam 1: between features — pick up any config edits before
             # negotiating the next sprint contract.
             self._reload_config_if_changed()
 
-            feature = progress.next_pending_feature()
+            feature = progress.next_actionable_feature(self.config.max_iterations_per_feature)
             if not feature:
-                console.print("[green]All features are passing. Harness complete.[/green]")
+                exhausted = progress.exhausted_features(self.config.max_iterations_per_feature)
+                if exhausted:
+                    console.print(
+                        f"[yellow]No features left to attempt "
+                        f"({len(exhausted)} exhausted their iteration budget).[/yellow]"
+                    )
+                else:
+                    console.print("[green]All features are passing. Harness complete.[/green]")
                 break
 
-            console.print(f"\n[bold]Feature:[/bold] {feature.name} [{feature.id}]")
-
-            # Mark in progress
-            progress = self.tracker.mark_in_progress(progress, feature.id)
-
-            # Build session opening context
-            session_ctx = self.session_opener.build_opening_context(
-                progress=progress,
-                handoff=handoff,
-                include_git_log=True,
+            resuming = feature.status != FeatureStatus.PENDING or feature.iteration_count > 0
+            suffix = (
+                f" — resuming at iteration {feature.iteration_count + 1}"
+                if resuming else ""
             )
+            console.print(f"\n[bold]Feature:[/bold] {escape(f'{feature.name} [{feature.id}]')}{suffix}")
+
+            # Mark in progress; remember the pre-feature commit (ADR-015).
+            progress = self.tracker.mark_in_progress(
+                progress, feature.id, base_commit_sha=git_head(project_dir),
+            )
+            feature = progress.get_feature(feature.id)
+
+            session_ctx = self._session_context(progress, feature)
+            lessons = read_lessons(project_dir, feature.id)
+            if lessons:
+                console.print(f"  [dim]Injecting lessons from {attempts_file_relpath(feature.id)}[/dim]")
 
             # Negotiate sprint contract (once per feature)
             if self.config.sprint_contract_enabled and feature.sprint_contract is None:
                 console.print("  Negotiating sprint contract...")
-                contract = GeneratorAgent(
-                    self.config,
-                    runner=self._agent_runner("generator") or self.runner,
-                ).negotiate_sprint_contract(
-                    feature=feature,
-                    spec=progress.spec or self.config.brief,
-                )
+
+                def _negotiate(runner):
+                    return GeneratorAgent(
+                        self.config, runner=runner or self.runner,
+                    ).negotiate_sprint_contract(
+                        feature=feature,
+                        spec=progress.spec or self.config.brief,
+                    )
+
+                contract = self._with_role_fallback("generator", _negotiate, protect_state=True)
                 progress = self.tracker.attach_sprint_contract(progress, feature.id, contract)
                 feature = progress.get_feature(feature.id)  # refresh
 
-            # GAN-style generator ↔ evaluator loop.
-            # Use a while-loop (not range) so live edits to
+            # GAN-style generator ↔ evaluator loop. The budget is per feature
+            # across runs: a resumed feature continues from its iteration
+            # count. A while-loop (not range) so live edits to
             # max_iterations_per_feature take effect on the next iteration.
-            evaluator_feedback: str | None = None
+            latest = feature.latest_evaluation
+            evaluator_feedback: str | None = (
+                latest.feedback if latest is not None and not latest.passed else None
+            )
             passed = False
-            iteration = 0
+            last_self_eval: str | None = None
+            iteration = feature.iteration_count
 
             while iteration < self.config.max_iterations_per_feature:
                 # Seam 2: between iterations within a feature — model swaps,
@@ -402,10 +464,11 @@ class Orchestrator:
                         session_preamble=session_ctx,
                         evaluator_feedback=evaluator_feedback,
                         iteration=iteration,
+                        lessons=lessons,
                     )
 
                 try:
-                    self_eval = self._with_role_fallback("generator", _generate)
+                    self_eval = self._with_role_fallback("generator", _generate, protect_state=True)
                 except RunnerTimeoutError as exc:
                     gen_agent = gen_holder.get("agent")
                     if gen_agent is not None:
@@ -416,6 +479,7 @@ class Orchestrator:
                     feature = progress.get_feature(feature.id)
                     evaluator_feedback = result.feedback
                     continue
+                last_self_eval = self_eval
                 gen_agent = gen_holder.get("agent")
                 if gen_agent is not None:
                     self._account_tokens(gen_agent.usage.total_tokens)
@@ -434,6 +498,7 @@ class Orchestrator:
                 result: EvaluationResult = self._with_role_fallback(
                     "evaluator",
                     _evaluate,
+                    protect_state=True,
                 )
                 eval_agent = eval_holder.get("agent")
                 if eval_agent is not None:
@@ -448,6 +513,7 @@ class Orchestrator:
                 if result.passed:
                     console.print(f"  [green]✓ Passed (score {result.overall_score:.1f})[/green]")
                     passed = True
+                    progress = self._commit_passing_feature(progress, feature.id, result.overall_score)
                     self._sync_project_git(f"feature {feature.id}")
                     break
 
@@ -459,21 +525,20 @@ class Orchestrator:
                 # Check if we need a context reset
                 if self.should_reset():
                     console.print("  [red]Context budget exceeded — triggering reset[/red]")
-                    handoff = self._do_context_reset(progress, feature.id, evaluator_feedback)
-                    session_ctx = self.session_opener.build_opening_context(
-                        progress=progress,
-                        handoff=handoff,
-                        include_git_log=True,
-                    )
+                    self._handoff = self._do_context_reset(progress, feature.id, evaluator_feedback)
+                    self._handoff_fresh = True
+                    session_ctx = self._session_context(progress, feature)
                     self.total_tokens = 0
 
             if not passed:
                 console.print(
                     f"  [red]Feature {feature.name} did not pass after "
-                    f"{self.config.max_iterations_per_feature} iterations.[/red]"
+                    f"{feature.iteration_count} iterations.[/red]"
                 )
+                progress = self._handle_exhausted(progress, feature.id, last_self_eval)
 
             progress = self.tracker.load()  # reload from disk
+
 
     # ------------------------------------------------------------------
     # Helpers
@@ -481,6 +546,147 @@ class Orchestrator:
 
     def _account_tokens(self, tokens: int) -> None:
         self.total_tokens += tokens
+
+    def _handoff_for(self, feature) -> HandoffDocument | None:
+        """The handoff to show while working on `feature` (P-27).
+
+        Handoffs are per reset: one written about f3 must not follow the run
+        into f9. A handoff is shown while its feature_id matches; one without
+        a feature (written at a feature seam) is shown for the first feature
+        after that reset only.
+        """
+        handoff = self._handoff
+        if handoff is None:
+            return None
+        if handoff.feature_id is not None:
+            return handoff if handoff.feature_id == feature.id else None
+        return handoff if self._handoff_fresh else None
+
+    def _session_context(self, progress: ProjectProgress, feature) -> str:
+        return self.session_opener.build_opening_context(
+            progress=progress,
+            handoff=self._handoff_for(feature),
+            include_git_log=True,
+        )
+
+    # ── Git recovery points (C-02 / ADR-015) ──────────────────────────────
+
+    def _commit_passing_feature(
+        self, progress: ProjectProgress, feature_id: str, score: float,
+    ) -> ProjectProgress:
+        """Harness-owned recovery point for a passing feature.
+
+        The generator may have committed already; this guarantees the commit
+        exists even if it did not. Records HEAD as the feature's commit_sha.
+        """
+        feature = progress.get_feature(feature_id)
+        project_dir = Path(self.config.output_dir)
+        message = f"feat({feature.id}): {feature.name} — score {score:.1f}"
+        try:
+            sha = commit_all(project_dir, message)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            detail = getattr(exc, "stderr", None) or str(exc)
+            console.print(f"  [yellow]Could not commit feature {feature.id}: {detail}[/yellow]")
+            return progress
+        if sha is None:
+            console.print("  [yellow]Not a git repository — no recovery point recorded.[/yellow]")
+            return progress
+        console.print(f"  [green]Recovery point:[/green] {sha[:10]}  {message}")
+        return self.tracker.record_commit(progress, feature.id, sha)
+
+    def _handle_exhausted(
+        self,
+        progress: ProjectProgress,
+        feature_id: str,
+        last_self_eval: str | None,
+    ) -> ProjectProgress:
+        """D-03: preserve the failed attempt, revert to the last stable state.
+
+        1. commit the attempt and point harness/attempt/<id>/<n> at it
+        2. write .harness/attempts/<id>.md (scores, feedback, pattern, branch)
+        3. git reset --hard <base_commit_sha> on the working branch — Harness
+           state files are snapshotted first and restored afterwards, so the
+           run's progress survives the reset
+        """
+        feature = progress.get_feature(feature_id)
+        project_dir = Path(self.config.output_dir)
+        attempt_number = len(feature.attempt_branches) + 1
+        base = feature.base_commit_sha
+        branch: str | None = None
+        attempt_commit: str | None = None
+        reverted = False
+
+        if is_git_repo(project_dir):
+            snapshot = self._snapshot_state_files()
+            try:
+                attempt_commit = commit_all(
+                    project_dir,
+                    f"wip({feature.id}): exhausted attempt {attempt_number} (preserved by Harness)",
+                )
+                if attempt_commit and attempt_commit != base:
+                    branch = f"harness/attempt/{feature.id}/{attempt_number}"
+                    create_branch(project_dir, branch, attempt_commit)
+                    if base:
+                        reset_hard(project_dir, base)
+                        reverted = True
+            except (subprocess.CalledProcessError, OSError) as exc:
+                detail = getattr(exc, "stderr", None) or str(exc)
+                console.print(f"  [yellow]Could not preserve/revert the attempt: {detail}[/yellow]")
+            finally:
+                self._restore_state_files(snapshot)
+
+        notes = write_attempt_notes(
+            project_dir,
+            feature,
+            attempt_number=attempt_number,
+            max_iterations=self.config.max_iterations_per_feature,
+            branch=branch,
+            base_commit=base if reverted else None,
+            attempt_commit=attempt_commit,
+            last_self_eval=last_self_eval,
+        )
+        progress = self.tracker.record_exhausted_attempt(progress, feature.id, branch)
+        if reverted:
+            try:
+                commit_all(
+                    project_dir,
+                    f"chore(harness): record exhausted attempt {attempt_number} of {feature.id}",
+                )
+            except (subprocess.CalledProcessError, OSError):
+                pass
+
+        lines = [f"[yellow]{feature.name}[/yellow] ({feature.id}) exhausted its iteration budget."]
+        if branch:
+            lines.append(f"Attempt preserved on branch [bold]{branch}[/bold].")
+        if reverted:
+            lines.append(f"Working branch reverted to {base[:10]} — the next feature starts clean.")
+        lines.append(f"Notes for the next attempt: {notes.relative_to(project_dir).as_posix()}")
+        console.print(Panel("\n".join(lines), title="[yellow]Feature exhausted[/yellow]", border_style="yellow"))
+        return progress
+
+    def _state_files(self) -> list[Path]:
+        """Harness-owned files that must survive a `git reset --hard`."""
+        project_dir = Path(self.config.output_dir)
+        names = {
+            self.config.features_file,
+            self.config.progress_file,
+            self.config.spec_file,
+            CONFIG_FILENAME,
+        }
+        files = [project_dir / name for name in sorted(names)]
+        files += sorted(project_dir.glob("handoff_session_*.json"))
+        harness_dir = project_dir / ".harness"
+        if harness_dir.is_dir():
+            files += sorted(p for p in harness_dir.rglob("*") if p.is_file())
+        return [p for p in files if p.is_file()]
+
+    def _snapshot_state_files(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in self._state_files()}
+
+    @staticmethod
+    def _restore_state_files(snapshot: dict[Path, bytes]) -> None:
+        for path, data in snapshot.items():
+            write_atomic(path, data)
 
     @staticmethod
     def _timeout_result(exc: RunnerTimeoutError, iteration: int) -> EvaluationResult:
@@ -558,11 +764,19 @@ class Orchestrator:
             console.print("\n".join(lines))
         return changes
 
-    def _with_role_fallback(self, role: str, call):
-        """Run one role call, rotating profiles when a runner reports a cap."""
+    def _with_role_fallback(self, role: str, call, protect_state: bool = False):
+        """Run one role call, rotating profiles when a runner reports a cap.
+
+        protect_state=True restores features.json if the agent session
+        modified it (C-10). The initializer is the one role allowed to write
+        it, so it does not pass the flag.
+        """
         while True:
             runner = self._agent_runner(role)
             try:
+                if protect_state:
+                    with self.tracker.protect_state():
+                        return call(runner)
                 return call(runner)
             except RunnerRateLimitedError as exc:
                 if self._advance_role_runner(role, exc):
@@ -658,6 +872,7 @@ class Orchestrator:
         return self.context_reset.build_handoff(
             progress=progress,
             session_number=self.session_number,
+            feature_id=current_feature_id,
             what_was_done=f"Worked on feature '{feature.name}' ({feature.iteration_count} iterations)",
             current_state=(
                 f"Feature '{feature.name}' is still failing. Latest score: {latest_score}"

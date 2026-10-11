@@ -3,12 +3,14 @@
 import re
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from pathlib import Path
 
 from harness.config import CONFIG_FILENAME, HarnessConfig, RunnerProfile, check_env_secrets
 from harness.orchestrator import Orchestrator
+from harness.progress.models import FeatureStatus
 from harness.progress.tracker import ProgressTracker
 from harness.runner_profiles import (
     HarnessSetup,
@@ -760,7 +762,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
     import uuid
     project_id = uuid.uuid4().hex[:8]
     slug = _slugify(project_name)
-    output_dir = Path("./output") / f"{slug}_{project_id}"
+    output_dir = (Path("./output") / f"{slug}_{project_id}").resolve()
 
     console.print(f"\n[dim]Project ID:[/dim] {project_id}")
     console.print(f"[dim]Output dir:[/dim] {output_dir}\n")
@@ -815,7 +817,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
 
     # ── Step 10: Run the full harness (spec injected into progress) ──────
     orchestrator = Orchestrator(config, runner_type=runner_type)
-    orchestrator.run(confirmed_spec=confirmed_spec)
+    _run_orchestrator(orchestrator, confirmed_spec=confirmed_spec)
 
 
 @main.command()
@@ -832,7 +834,7 @@ def new(runner: str | None, with_api: bool, model: str | None,
 )
 def run(config_file: str, runner: str | None, model: str | None):
     """Run the full harness for a project defined in CONFIG_FILE."""
-    config = HarnessConfig.from_yaml(config_file)
+    config = _load_config_file(config_file)
     if runner is None:
         _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
@@ -850,7 +852,7 @@ def run(config_file: str, runner: str | None, model: str | None):
     _apply_model_override(config, runner_type, model)
 
     orchestrator = Orchestrator(config, runner_type=runner_type)
-    orchestrator.run()
+    _run_orchestrator(orchestrator)
 
 
 @main.command()
@@ -875,7 +877,7 @@ def resume(project_dir: str, runner: str | None, model: str | None):
       • plan step skips if spec.md already exists
       • feature loop continues from the next pending feature
     """
-    project_path = Path(project_dir)
+    project_path = Path(project_dir).resolve()
     config_path = HarnessConfig.default_config_path(project_path)
     if not config_path.exists():
         console.print(
@@ -884,7 +886,18 @@ def resume(project_dir: str, runner: str | None, model: str | None):
         )
         raise SystemExit(1)
 
-    config = HarnessConfig.from_yaml(config_path)
+    # P-01: the directory we were given is the project. A relative output_dir
+    # recorded by an older Harness would otherwise resolve against the cwd
+    # (the auto-resume job cds into the project first) and restart the run in
+    # a nested output/ directory.
+    stored = _load_config_file(config_path, pin_project_dir=False).output_dir
+    config = _load_config_file(config_path)
+    if Path(stored).expanduser().resolve() != project_path:
+        console.print(
+            f"[yellow]{CONFIG_FILENAME} records output_dir {stored!r}, which is not "
+            f"this project directory; using {project_path} and saving it.[/yellow]"
+        )
+        config.save_file(config_path)
     if runner is None:
         _apply_saved_setup(config)
     _require_anthropic_key_for_api_mode(config.orchestration_mode)
@@ -898,51 +911,125 @@ def resume(project_dir: str, runner: str | None, model: str | None):
             border_style="green",
         )
     )
-
-    # Peek at features.json without forcing the canonical shape — it might
-    # be a bare list written by an agentic runner, which is a recognized
-    # state the initializer normalizes on the next phase.
-    import json
-    features_path = config.features_path
-    if not features_path.exists():
-        console.print("[dim]No features yet — starting from initialize phase.[/dim]\n")
-    else:
-        try:
-            data = json.loads(features_path.read_text())
-            if isinstance(data, dict):
-                count = len(data.get("features", []))
-                passing = sum(
-                    1 for f in data.get("features", [])
-                    if f.get("status") == "passing"
-                )
-                pct = round(passing / count * 100, 1) if count else 0.0
-                spec_note = "with spec" if data.get("spec") else "no spec yet"
-                console.print(
-                    f"[dim]Progress:[/dim] {pct}% ({passing}/{count} features), "
-                    f"{spec_note}, session {data.get('session_count', 0)}\n"
-                )
-            elif isinstance(data, list):
-                console.print(
-                    f"[dim]Found bare-list features.json ({len(data)} features) — "
-                    f"will normalize on init phase.[/dim]\n"
-                )
-            else:
-                console.print(
-                    "[yellow]features.json shape not recognized — "
-                    "init phase will recreate.[/yellow]\n"
-                )
-        except Exception as e:
-            console.print(
-                f"[yellow]Could not read features.json ({e}); "
-                f"init phase will recreate.[/yellow]\n"
-            )
+    _print_resume_summary(config)
 
     runner_type = _resolve_runner(config, runner)
     if runner is not None:
         config.runner_profiles = []
     _apply_model_override(config, runner_type, model)
     orchestrator = Orchestrator(config, runner_type=runner_type)
-    orchestrator.run()
+    _run_orchestrator(orchestrator)
+
+
+def _print_resume_summary(config: HarnessConfig) -> None:
+    """C-09: say what is being resumed before any agent starts."""
+    import json
+    from harness.context.handoff import HandoffDocument
+    from harness.progress.tracker import CorruptFeaturesFileError
+
+    features_path = config.features_path
+    if not features_path.exists():
+        console.print("[dim]No features yet — starting from initialize phase.[/dim]\n")
+        return
+    try:
+        progress = ProgressTracker(config).load()
+    except CorruptFeaturesFileError:
+        # Possibly a bare list written by an agentic runner — a recognized
+        # state the initializer normalizes; anything else it reports.
+        try:
+            data = json.loads(features_path.read_text(encoding="utf-8"))
+        except ValueError:
+            data = None
+        if isinstance(data, list):
+            console.print(
+                f"[dim]Found bare-list features.json ({len(data)} features) — "
+                f"will normalize on init phase.[/dim]\n"
+            )
+        else:
+            console.print(
+                "[yellow]features.json is not a valid progress file — the "
+                "initialize phase will back it up and stop.[/yellow]\n"
+            )
+        return
+
+    max_iter = config.max_iterations_per_feature
+    summary = progress.resume_summary(max_iter)
+    total = len(progress.features)
+    lines = [
+        f"[bold]Progress:[/bold] {progress.completion_pct}% "
+        f"({len(summary.passing)}/{total} passing) · "
+        f"{len(summary.in_progress)} in progress · {len(summary.pending)} pending · "
+        f"{len(summary.exhausted)} exhausted retries",
+        f"[dim]Spec:[/dim] {'yes' if progress.spec or config.spec_path.exists() else 'not yet'}"
+        f"   [dim]Session:[/dim] {progress.session_count}",
+    ]
+    nxt = summary.next_feature
+    if nxt is not None:
+        state = {
+            FeatureStatus.IN_PROGRESS: "interrupted",
+            FeatureStatus.FAILING: "failing",
+        }.get(nxt.status, "pending")
+        lines.append(
+            f"[bold]Picks up:[/bold] {escape(f'[{nxt.id}] {nxt.name}')} ({state}, "
+            f"iteration {nxt.iteration_count + 1}/{max_iter})"
+        )
+    elif summary.exhausted:
+        lines.append("[yellow]Nothing left to attempt — every remaining feature is exhausted.[/yellow]")
+    else:
+        lines.append("[green]Every feature is passing.[/green]")
+    for f in summary.exhausted:
+        lines.append(f"  [yellow]•[/yellow] exhausted: {escape(f'[{f.id}] {f.name}')} ({f.iteration_count} iterations)")
+
+    handoff = HandoffDocument.load_latest(Path(config.output_dir))
+    if handoff is None:
+        lines.append("[dim]Handoff:[/dim] none")
+    else:
+        about = f"feature {handoff.feature_id}" if handoff.feature_id else "between features"
+        used = (
+            " — will be used" if nxt is not None and handoff.feature_id == nxt.id
+            else " — not for the next feature"
+        )
+        lines.append(f"[dim]Handoff:[/dim] session {handoff.session_number} ({about}){used}")
+    console.print("\n".join(lines) + "\n")
+
+
+def _load_config_file(path: str | Path, *, pin_project_dir: bool = True) -> HarnessConfig:
+    """Load a config file (or project dir) with readable errors.
+
+    A harness_config.json — or a directory containing one — is a project
+    config and gets output_dir pinned to its directory (P-01). Other files
+    (examples/*.yaml) keep their output_dir as written.
+    """
+    from pydantic import ValidationError
+
+    path = Path(path)
+    try:
+        if path.is_dir():
+            return HarnessConfig.load_project(path)
+        if pin_project_dir and path.name == CONFIG_FILENAME:
+            return HarnessConfig.load_project(path.parent)
+        return HarnessConfig.from_file(path)
+    except ValidationError as exc:
+        problems = "\n".join(
+            f"  • {'.'.join(str(p) for p in err.get('loc', ())) or 'config'}: {err.get('msg')}"
+            for err in exc.errors()
+        )
+        console.print(Panel(problems, title=f"[red]Invalid config: {path}[/red]", border_style="red"))
+        raise SystemExit(1)
+    except (OSError, ValueError) as exc:
+        console.print(Panel(str(exc), title=f"[red]Cannot read config: {path}[/red]", border_style="red"))
+        raise SystemExit(1)
+
+
+def _run_orchestrator(orchestrator: Orchestrator, **kwargs) -> None:
+    """Run the orchestrator, reporting state problems without a traceback."""
+    from harness.progress.tracker import CorruptFeaturesFileError
+
+    try:
+        orchestrator.run(**kwargs)
+    except CorruptFeaturesFileError as exc:
+        console.print(Panel(str(exc), title="[red]Progress file problem[/red]", border_style="red"))
+        raise SystemExit(1)
 
 
 @main.command("import")
@@ -1053,7 +1140,7 @@ def import_repo(
         console.print(f"[yellow]In-place mode:[/yellow] writing harness artifacts into {output_dir}")
     else:
         slug = _slugify(project_name)
-        output_dir = Path("./output") / f"{slug}_{project_id}"
+        output_dir = (Path("./output") / f"{slug}_{project_id}").resolve()
         if output_dir.exists():
             raise click.UsageError(f"Refusing to overwrite existing {output_dir}")
         console.print(f"[dim]Copying source → {output_dir}[/dim]")
@@ -1074,12 +1161,12 @@ def import_repo(
     # ── Step 4: If harness_config.json already exists, use that Harness state ─
     cfg_path = HarnessConfig.default_config_path(output_dir)
     if cfg_path.exists() and not in_place:
-        config = HarnessConfig.from_yaml(cfg_path)
+        config = _load_config_file(cfg_path)
         config.output_dir = str(output_dir)
         config.project_id = project_id
         config.save_yaml(cfg_path)
     elif cfg_path.exists() and in_place:
-        config = HarnessConfig.from_yaml(cfg_path)
+        config = _load_config_file(cfg_path)
         console.print(f"[dim]Existing {CONFIG_FILENAME} found — using it.[/dim]")
     else:
         # Resolve brief
@@ -1178,7 +1265,7 @@ def import_repo(
     ))
 
     orchestrator = Orchestrator(config, runner_type=runner_type)
-    orchestrator.run(review_only=review_only, confirmed_spec=confirmed_spec)
+    _run_orchestrator(orchestrator, review_only=review_only, confirmed_spec=confirmed_spec)
 
 
 def _slug_to_title(slug: str) -> str:
@@ -1292,13 +1379,22 @@ def animation_theme(
 @main.command()
 @click.argument("config_file", type=click.Path(exists=True))
 def status(config_file: str):
-    """Print current progress for a project."""
-    config = HarnessConfig.from_yaml(config_file)
+    """Print current progress for a project.
+
+    CONFIG_FILE is a project directory, its harness_config.json, or any
+    config file.
+    """
+    from harness.progress.tracker import CorruptFeaturesFileError
+
+    config = _load_config_file(config_file)
     tracker = ProgressTracker(config)
     try:
         progress = tracker.load()
     except FileNotFoundError:
         console.print("[red]No features file found. Run 'harness run' first.[/red]")
+        raise SystemExit(1)
+    except CorruptFeaturesFileError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise SystemExit(1)
 
     console.print(f"\n[bold]{progress.project_name}[/bold]")
@@ -1320,7 +1416,7 @@ def status(config_file: str):
         score = ""
         if feature.latest_evaluation:
             score = f" ({feature.latest_evaluation.overall_score:.1f}/10)"
-        console.print(f"  {icon} [{feature.id}] {feature.name}{score}")
+        console.print(f"  {icon} {escape(f'[{feature.id}] {feature.name}')}{score}")
 
 
 @main.command()
@@ -1329,7 +1425,7 @@ def status(config_file: str):
 @click.option("--project-name", default=None, help="Override project name from config")
 def init(config_file: str, brief: str, project_name: str | None):
     """Initialize a new project (features.json, init.sh, first git commit)."""
-    config = HarnessConfig.from_yaml(config_file)
+    config = _load_config_file(config_file)
     _apply_saved_setup(config)
     if project_name:
         config.project_name = project_name
@@ -1360,7 +1456,7 @@ def init(config_file: str, brief: str, project_name: str | None):
 @click.argument("config_file", type=click.Path(exists=True))
 def plan(config_file: str):
     """Run only the planner agent to expand the brief into a spec."""
-    config = HarnessConfig.from_yaml(config_file)
+    config = _load_config_file(config_file)
     _apply_saved_setup(config)
     tracker = ProgressTracker(config)
     progress = tracker.load()

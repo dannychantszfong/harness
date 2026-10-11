@@ -12,11 +12,22 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from harness.timeutil import utcnow
 
 from harness.agents.base import BaseAgent
-from harness.progress.models import Feature, FeatureStatus, ProjectProgress
-from harness.progress.tracker import ProgressTracker
+from harness.progress.models import (
+    Feature,
+    FeatureStatus,
+    ProjectProgress,
+    dedupe_feature_ids,
+    normalize_feature_entries,
+)
+from harness.progress.tracker import (
+    CorruptFeaturesFileError,
+    ProgressTracker,
+    backup_corrupt_file,
+)
+from harness.project_git import commit_all, ensure_project_gitignore
+from harness.timeutil import utcnow
 
 
 # Platform-specific init-script defaults. The initializer falls back to
@@ -113,16 +124,7 @@ class InitializerAgent(BaseAgent):
 
         # ── shared: build Feature objects ──────────────────────────────────
 
-        features = [
-            Feature(
-                id=f["id"],
-                name=f["name"],
-                description=f["description"],
-                priority=f.get("priority", idx),
-                status=FeatureStatus.PENDING,
-            )
-            for idx, f in enumerate(raw_features)
-        ]
+        features = _features_from_raw(raw_features)
 
         progress = ProjectProgress(
             project_name=self.config.project_name,
@@ -224,7 +226,18 @@ class InitializerAgent(BaseAgent):
 
         # Preferred path: the runner wrote files directly to disk.
         if feat_path.exists():
-            raw = json.loads(feat_path.read_text())
+            try:
+                raw = json.loads(feat_path.read_text(encoding="utf-8"))
+            except ValueError as exc:
+                # Freshly written by the agent, not user progress: move it
+                # aside so a re-run decomposes again instead of reporting
+                # "corrupt progress".
+                bad = feat_path.with_name(f"{feat_path.name}.invalid-{utcnow():%Y%m%dT%H%M%SZ}")
+                feat_path.replace(bad)
+                raise RuntimeError(
+                    f"The initializer agent wrote invalid JSON to {feat_path.name} "
+                    f"({exc}); it was moved to {bad.name}. Re-run to decompose again."
+                ) from exc
             if isinstance(raw, dict) and "features" in raw:
                 raw = raw["features"]
             init_sh = (
@@ -261,35 +274,41 @@ class InitializerAgent(BaseAgent):
         Agentic runners sometimes write features.json as a plain list rather
         than the ProjectProgress envelope. We promote that to canonical shape
         on first read so downstream code only ever sees one format.
+
+        Anything else is corrupt progress (P-03): it is backed up to
+        features.json.corrupt-<timestamp> and the run aborts — re-decomposing
+        would silently overwrite the user's progress.
         """
+        path = self.config.features_path
         try:
-            progress = tracker.load()
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise CorruptFeaturesFileError(path, f"invalid JSON ({exc})", backup_corrupt_file(path)) from exc
+
+        if isinstance(data, dict) and "project_name" in data:
+            try:
+                progress = tracker.load()
+            except CorruptFeaturesFileError as exc:
+                raise CorruptFeaturesFileError(path, exc.detail, backup_corrupt_file(path)) from exc
             print(
                 f"[initializer] Loaded existing features.json "
                 f"({len(progress.features)} features); skipping decomposition."
             )
             return progress
-        except Exception:
-            pass
 
-        try:
-            data = json.loads(self.config.features_path.read_text())
-        except Exception:
-            return None
-
-        if not isinstance(data, list):
-            return None
-
-        features = [
-            Feature(
-                id=f["id"],
-                name=f["name"],
-                description=f["description"],
-                priority=f.get("priority", idx),
-                status=FeatureStatus.PENDING,
+        is_bare = isinstance(data, list) or (
+            isinstance(data, dict) and isinstance(data.get("features"), list)
+        )
+        if not is_bare:
+            raise CorruptFeaturesFileError(
+                path,
+                "expected a Harness progress object or a list of features",
+                backup_corrupt_file(path),
             )
-            for idx, f in enumerate(data)
-        ]
+        try:
+            features = _features_from_raw(data)
+        except ValueError as exc:
+            raise CorruptFeaturesFileError(path, str(exc), backup_corrupt_file(path)) from exc
         progress = ProjectProgress(
             project_name=self.config.project_name,
             brief=brief,
@@ -307,6 +326,8 @@ class InitializerAgent(BaseAgent):
         return progress
 
     def _initial_git_commit(self, directory: Path) -> None:
+        # Runtime files (auto-resume wrappers, logs) never belong in the repo.
+        ensure_project_gitignore(directory)
         try:
             subprocess.run(["git", "init"], cwd=directory, check=True, capture_output=True)
             subprocess.run(
@@ -315,13 +336,19 @@ class InitializerAgent(BaseAgent):
                 check=False,
                 capture_output=True,
             )
-            subprocess.run(["git", "add", "-A"], cwd=directory, check=True, capture_output=True)
-            subprocess.run(
-                ["git", "commit", "-m", "chore: harness initialization"],
-                cwd=directory,
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
+            if commit_all(directory, "chore: harness initialization") is None:
+                raise subprocess.CalledProcessError(1, "git commit")
+        except (subprocess.CalledProcessError, OSError):
             # Not fatal — git may already be initialized or not available
             print("[initializer] Warning: could not create initial git commit")
+
+
+def _features_from_raw(raw) -> list[Feature]:
+    """Validated, de-duplicated Feature objects from runner output (P-04)."""
+    entries, warnings = normalize_feature_entries(raw)
+    for warning in warnings:
+        print(f"[initializer] Warning: features.json {warning}")
+    features = [Feature(status=FeatureStatus.PENDING, **entry) for entry in entries]
+    for old, new in dedupe_feature_ids(features):
+        print(f"[initializer] Warning: duplicate feature id {old!r} renamed to {new!r}")
+    return features

@@ -282,10 +282,28 @@ class HarnessConfig(BaseModel):
         """Backward-compatible name; reads JSON when the file suffix is .json."""
         return cls.from_file(path)
 
+    @classmethod
+    def load_project(cls, project_dir: str | Path) -> "HarnessConfig":
+        """Load <project_dir>/harness_config.json with output_dir pinned to it.
+
+        A project's config lives at its root, so the directory it was found
+        in *is* the output dir — whatever (possibly relative, P-01) path the
+        file recorded, and whatever the current working directory is.
+        """
+        project_dir = Path(project_dir).resolve()
+        config = cls.from_file(cls.default_config_path(project_dir))
+        config.output_dir = str(project_dir)
+        return config
+
     def save_file(self, path: str | Path) -> None:
-        """Serialize config to JSON by default, YAML only for .yaml/.yml paths."""
+        """Serialize config to JSON by default, YAML only for .yaml/.yml paths.
+
+        output_dir is persisted as an absolute path (P-01): `harness resume`
+        and the auto-resume scheduler run from other working directories.
+        """
         path = Path(path)
         self.check_secrets()
+        self.output_dir = str(Path(self.output_dir).resolve())
         data = self.model_dump(mode="json")
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.suffix.lower() == ".json":
