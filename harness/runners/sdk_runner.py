@@ -17,15 +17,17 @@ preset and no settings sources by default).
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Optional
 
 from rich.console import Console
 
 from harness.runners._rate_limit import classify_failure
 from harness.runners.base import (
+    WRITE_TOOLS,
     CodeRunner,
     PreflightResult,
     RunResult,
+    RunnerAccess,
     RunnerType,
     missing_cwd_result,
 )
@@ -91,8 +93,8 @@ class SDKRunner(CodeRunner):
             warning=warning,
         )
 
-    def _options_kwargs(self, cwd: str) -> dict[str, Any]:
-        return {
+    def _options_kwargs(self, cwd: str, access: Optional[RunnerAccess] = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
             "cwd": cwd,
             "max_turns": int(getattr(self.config, "sdk_max_turns", None) or DEFAULT_SDK_MAX_TURNS),
             "model": getattr(self.config, "code_runner_model", None),
@@ -100,12 +102,22 @@ class SDKRunner(CodeRunner):
             # used by SubprocessRunner. Required for unattended runs.
             "permission_mode": "bypassPermissions",
         }
+        if access is not None and access.restricted:
+            # Non-interactive: anything outside the allow-list is denied.
+            kwargs["permission_mode"] = "default"
+            kwargs["allowed_tools"] = list(access.allowed_tools)
+            if access.read_only:
+                kwargs["disallowed_tools"] = list(WRITE_TOOLS)
+        if access is not None and access.mcp_config:
+            kwargs["mcp_servers"] = access.mcp_config
+        return kwargs
 
     def implement(
         self,
         prompt: str,
         cwd: str,
         timeout_seconds: int | None = None,
+        access: Optional[RunnerAccess] = None,
     ) -> RunResult:
         timeout_seconds = self._timeout(timeout_seconds)
         missing = missing_cwd_result(cwd)
@@ -119,7 +131,7 @@ class SDKRunner(CodeRunner):
 
         try:
             with self.profile_env():
-                return asyncio.run(self._run_async(prompt, cwd, timeout_seconds))
+                return asyncio.run(self._run_async(prompt, cwd, timeout_seconds, access))
         except asyncio.TimeoutError:
             return RunResult(
                 output="",
@@ -138,14 +150,20 @@ class SDKRunner(CodeRunner):
                 rate_limited=rate_limited,
             )
 
-    async def _run_async(self, prompt: str, cwd: str, timeout_seconds: int) -> RunResult:
+    async def _run_async(
+        self,
+        prompt: str,
+        cwd: str,
+        timeout_seconds: int,
+        access: Optional[RunnerAccess] = None,
+    ) -> RunResult:
         from claude_code_sdk import query, ClaudeCodeOptions
 
         output_parts: list[str] = []
         tool_calls: list[str] = []
         final: dict[str, Any] = {}
 
-        stream = query(prompt=prompt, options=ClaudeCodeOptions(**self._options_kwargs(cwd)))
+        stream = query(prompt=prompt, options=ClaudeCodeOptions(**self._options_kwargs(cwd, access)))
 
         async def _consume() -> None:
             async for message in stream:

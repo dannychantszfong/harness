@@ -9,9 +9,14 @@ from harness.config import HarnessConfig
 from harness.ui import QuietAnimator
 
 if TYPE_CHECKING:
-    from harness.runners.base import CodeRunner
+    from harness.runners.base import CodeRunner, RunnerAccess
 
 console = Console()
+
+
+def _short(value: Any, limit: int = 120) -> str:
+    text = str(value)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _number(value: Any) -> int | float:
@@ -66,6 +71,9 @@ class BaseAgent(ABC):
     """
 
     role: str = "agent"
+    # Which permission set runner sessions get (C-06). Defaults to `role`;
+    # the initializer shares the planner's model but must write files.
+    access_role: str | None = None
 
     def __init__(
         self,
@@ -81,6 +89,8 @@ class BaseAgent(ABC):
         else:
             self.client = None  # type: ignore[assignment]
         self.usage = TokenUsage()
+        if self.access_role is None:
+            self.access_role = self.role
 
     @property
     def model(self) -> str:
@@ -145,7 +155,111 @@ class BaseAgent(ABC):
 
         return full_text, tool_uses
 
-    def _call_via_runner(self, prompt: str) -> str:
+    def _call_with_tools(
+        self,
+        system: str,
+        messages: list[dict],
+        final_tool: dict,
+        *,
+        inspect: bool = True,
+        max_rounds: int | None = None,
+        max_tokens: int = 8192,
+    ) -> dict | None:
+        """Bounded tool loop for api mode (ADR-016).
+
+        The model may call the project-inspection tools (read_file,
+        list_files, search, run_command — see agents/tools.py) for up to
+        max_rounds rounds; after that `final_tool` is forced. Returns the
+        final tool's input, or None if the model never produced it.
+        """
+        from harness.agents.tools import ProjectTools
+
+        tools_impl = ProjectTools(self.config) if inspect else None
+        tools = (list(tools_impl.definitions) if tools_impl else []) + [final_tool]
+        final_name = final_tool["name"]
+        rounds = self.config.api_tool_rounds if max_rounds is None else max_rounds
+        rounds = rounds if tools_impl else 0
+        messages = list(messages)
+
+        console.print(f"\n[bold cyan]── {self.role.upper()} ──[/bold cyan]")
+        phase = {"planner": "planning", "evaluator": "evaluating"}.get(self.role, "waiting")
+        for round_number in range(rounds + 1):
+            forced = round_number >= rounds
+            params: dict[str, Any] = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                "messages": messages,
+                # The last round may only answer with the final tool.
+                "tools": [final_tool] if forced else tools,
+                "tool_choice": {"type": "tool", "name": final_name} if forced else {"type": "auto"},
+            }
+            with QuietAnimator.from_config(self.config, phase=phase):
+                resp = self.client.messages.create(**params)
+            self.usage.update(resp.usage)
+
+            assistant_content: list[dict] = []
+            tool_uses = []
+            for block in resp.content:
+                if block.type == "text":
+                    assistant_content.append({"type": "text", "text": block.text})
+                    if block.text.strip():
+                        console.print(f"[dim]{block.text.strip()[:500]}[/dim]")
+                elif block.type == "tool_use":
+                    assistant_content.append(
+                        {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                    )
+                    tool_uses.append(block)
+            for block in tool_uses:
+                if block.name == final_name:
+                    return block.input if isinstance(block.input, dict) else None
+            if forced:
+                return None
+
+            messages.append({"role": "assistant", "content": assistant_content or [{"type": "text", "text": "…"}]})
+            if not tool_uses:
+                messages.append({
+                    "role": "user",
+                    "content": f"Continue inspecting with the tools, or call {final_name} with your result.",
+                })
+                continue
+            results = []
+            for block in tool_uses:
+                console.print(f"  [dim]→ {block.name} {_short(block.input)}[/dim]")
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": tools_impl.execute(block.name, block.input),
+                })
+            messages.append({"role": "user", "content": results})
+        return None
+
+    def _access_kwargs(self, access_role: str | None = None) -> dict:
+        """`access=` only for restricted sessions, so runners written against
+        the original implement(prompt, cwd, timeout_seconds) keep working."""
+        access = self._runner_access(access_role)
+        return {"access": access} if access is not None else {}
+
+    def _runner_access(self, access_role: str | None = None) -> "RunnerAccess | None":
+        """Permissions for a runner session of this agent's role (C-06).
+
+        An explicit role_allowed_tools entry restricts any role to that list;
+        roles in read_only_roles get the built-in read-only list; everything
+        else (generator, initializer, reviewer) keeps full access.
+        """
+        from harness.runners.base import RunnerAccess, default_read_only_tools
+
+        role = access_role or self.access_role
+        read_only = role in (self.config.read_only_roles or [])
+        tools = (self.config.role_allowed_tools or {}).get(role)
+        if not read_only and not tools:
+            return None
+        return RunnerAccess(
+            read_only=read_only,
+            allowed_tools=tuple(tools or default_read_only_tools(self.config)),
+        )
+
+    def _call_via_runner(self, prompt: str, access_role: str | None = None) -> str:
         """Send a plain-text prompt through the runner instead of the Anthropic API.
 
         Used in orchestration_mode="runner" so that planner/evaluator run on the
@@ -156,7 +270,12 @@ class BaseAgent(ABC):
                 "orchestration_mode='runner' but no runner was passed to this agent."
             )
         cwd = str(self.config.output_path)
-        result = self.runner.implement(prompt, cwd=cwd, timeout_seconds=self._runner_timeout())
+        result = self.runner.implement(
+            prompt,
+            cwd=cwd,
+            timeout_seconds=self._runner_timeout(),
+            **self._access_kwargs(access_role),
+        )
         self.usage.add_run_result(result)
         if not result.success:
             if result.rate_limited or result.rate_limit_reset_at is not None:

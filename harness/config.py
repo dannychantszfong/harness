@@ -107,6 +107,28 @@ class HarnessConfig(BaseModel):
     max_iterations_per_feature: int = 15
     evaluator_pass_score: float = 8.0  # out of 10
     evaluator_weights: EvaluatorWeights = Field(default_factory=EvaluatorWeights)
+    # A feature passes only if the weighted score clears evaluator_pass_score
+    # AND functionality is at least this (ADR-013): 9/9/9/3 must not pass.
+    evaluator_functionality_floor: float = Field(default=6.0, ge=0, le=10)
+
+    # Role-appropriate permissions in runner mode (C-06). Roles listed in
+    # read_only_roles run without write tools (Claude Code: dontAsk + an
+    # allow-list; Codex: --sandbox read-only). role_allowed_tools overrides
+    # the Claude Code tool list for any role, in Claude Code permission-rule
+    # syntax, e.g. {"evaluator": ["Read", "Grep", "Bash(npm test *)"]}.
+    # Roles: planner, initializer, generator, evaluator, reviewer, contract.
+    read_only_roles: list[str] = Field(
+        default_factory=lambda: ["planner", "evaluator", "contract"]
+    )
+    role_allowed_tools: dict[str, list[str]] = Field(default_factory=dict)
+    # The project's test command, allow-listed for read-only roles and the
+    # api-mode evaluator's run_command tool (e.g. "npm test", "pytest -q").
+    test_command: Optional[str] = None
+
+    # api mode only (ADR-016): the evaluator inspects the project through a
+    # bounded tool loop before it must call submit_evaluation.
+    api_tool_rounds: int = Field(default=20, ge=0)
+    api_command_timeout_seconds: int = Field(default=120, ge=5)
 
     # Progress files (written inside output_dir)
     features_file: str = "features.json"
@@ -255,6 +277,13 @@ class HarnessConfig(BaseModel):
     @model_validator(mode="after")
     def _runner_env_secrets_are_references(self) -> "HarnessConfig":
         check_env_secrets(self.active_runner_env, "active_runner_env")
+        return self
+
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self) -> "HarnessConfig":
+        # P-06: the overall score is computed from these, so a typo must
+        # fail on load rather than silently skew every grade.
+        self.evaluator_weights.validate_sum()
         return self
 
     def check_secrets(self) -> None:

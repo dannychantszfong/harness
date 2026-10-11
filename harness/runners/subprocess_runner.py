@@ -24,6 +24,7 @@ from harness.runners.base import (
     CodeRunner,
     PreflightResult,
     RunResult,
+    RunnerAccess,
     RunnerType,
     missing_cwd_result,
 )
@@ -111,16 +112,15 @@ class SubprocessRunner(CodeRunner):
             details=f"Binary: {path}  ({ver})   Model: {model}",
         )
 
-    def _permission_args(self) -> list[str]:
-        return ["--dangerously-skip-permissions"]  # required for unattended use
-
-    def build_command(self) -> list[str]:
+    def build_command(self, access: Optional[RunnerAccess] = None) -> list[str]:
         cmd = [
             "claude",
             "--print",                 # non-interactive, print final output
             "--output-format", "json",  # final message + usage + cost
-            *self._permission_args(),
+            *self._claude_permission_args(access),
         ]
+        if access is not None and access.mcp_config:
+            cmd += ["--mcp-config", access.mcp_config]
         model = getattr(self.config, "code_runner_model", None)
         if model:
             cmd.extend(["--model", model])
@@ -132,6 +132,7 @@ class SubprocessRunner(CodeRunner):
         prompt: str,
         cwd: str,
         timeout_seconds: int | None = None,
+        access: Optional[RunnerAccess] = None,
     ) -> RunResult:
         timeout_seconds = self._timeout(timeout_seconds)
         missing = missing_cwd_result(cwd)
@@ -152,7 +153,7 @@ class SubprocessRunner(CodeRunner):
 
         # Launch the resolved path: on Windows `claude` may be a .cmd shim
         # that CreateProcess cannot find by bare name.
-        cmd = [binary, *self.build_command()[1:]]
+        cmd = [binary, *self.build_command(access)[1:]]
         try:
             with QuietAnimator.from_config(self.config, phase="coding"):
                 result = subprocess.run(

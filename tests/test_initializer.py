@@ -62,23 +62,26 @@ def _stub_runner(output: str = "", side_effect=None) -> MagicMock:
 # ── API path ─────────────────────────────────────────────────────────────────
 
 def test_initializer_api_path_uses_tool_use(api_config, monkeypatch):
-    """The API path goes through _call() with the set_feature_list tool."""
+    """The API path goes through the bounded tool loop and must end with
+    the set_feature_list tool (it may inspect an imported repo first)."""
     agent = InitializerAgent(api_config)
     fake_features = [
         {"id": "f1", "name": "Foo", "description": "Does foo", "priority": 0},
         {"id": "f2", "name": "Bar", "description": "Does bar", "priority": 1},
     ]
     fake_init = "#!/bin/bash\necho hi\n"
+    seen = {}
 
-    def fake_call(self, system, messages, tools, **kw):
-        return "", [{"id": "tu1", "name": "set_feature_list",
-                     "input": {"features": fake_features, "init_sh": fake_init}}]
+    def fake_call_with_tools(self, system, messages, final_tool, **kw):
+        seen["final_tool"] = final_tool["name"]
+        return {"features": fake_features, "init_sh": fake_init}
 
-    monkeypatch.setattr(InitializerAgent, "_call", fake_call)
+    monkeypatch.setattr(InitializerAgent, "_call_with_tools", fake_call_with_tools)
     monkeypatch.setattr(InitializerAgent, "_initial_git_commit", lambda *a, **k: None)
 
     progress = agent.run(brief=api_config.brief)
 
+    assert seen["final_tool"] == "set_feature_list"
     assert len(progress.features) == 2
     assert progress.features[0].id == "f1"
     assert progress.features[0].status == FeatureStatus.PENDING

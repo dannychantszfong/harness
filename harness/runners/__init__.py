@@ -1,4 +1,4 @@
-from harness.runners.base import CodeRunner, RunResult, RunnerType, PreflightResult
+from harness.runners.base import CodeRunner, PreflightResult, RunnerAccess, RunResult, RunnerType
 from harness.runners.subprocess_runner import SubprocessRunner
 from harness.runners.sdk_runner import SDKRunner
 from harness.runners.codex_runner import CodexRunner
@@ -25,7 +25,7 @@ def create_runner(runner_type: RunnerType, config) -> CodeRunner:
 
 
 __all__ = [
-    "CodeRunner", "RunResult", "RunnerType", "PreflightResult",
+    "CodeRunner", "RunResult", "RunnerType", "PreflightResult", "RunnerAccess",
     "create_runner",
     "SubprocessRunner", "SDKRunner", "CodexRunner",
 ]

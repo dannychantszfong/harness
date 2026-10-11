@@ -92,7 +92,8 @@ _FEATURE_TOOL = {
 
 
 class InitializerAgent(BaseAgent):
-    role = "planner"
+    role = "planner"  # planner_model / planner_timeout_seconds
+    access_role = "initializer"  # writes features.json + the init script
 
     def run(self, brief: str, spec: str | None = None) -> ProjectProgress:
         tracker = ProgressTracker(self.config)
@@ -158,7 +159,11 @@ class InitializerAgent(BaseAgent):
         return progress
 
     def _decompose_via_api(self, planning_source: str) -> tuple[list[dict], str]:
-        """Use Anthropic API tool-use to get a structured feature list."""
+        """Use Anthropic API tool-use to get a structured feature list.
+
+        Runs the bounded tool loop (ADR-016) so that, for an imported repo,
+        the model can read the existing code before decomposing.
+        """
         script_type = self.config.effective_init_script_type
         script_label = _INIT_SCRIPT_PROMPT_LABEL[script_type]
         messages = [
@@ -167,21 +172,20 @@ class InitializerAgent(BaseAgent):
                 "content": (
                     f"{planning_source}\n\n"
                     f"Please decompose this into a feature list and write an "
-                    f"init script ({script_label}). "
+                    f"init script ({script_label}). If the project directory already "
+                    f"contains code, inspect it first so the list reflects what exists. "
                     f"Use the set_feature_list tool to output your answer."
                 ),
             }
         ]
-        _, tool_uses = self._call(
+        inp = self._call_with_tools(
             system=_SYSTEM,
             messages=messages,
-            tools=[_FEATURE_TOOL],
-            stream=False,
+            final_tool=_FEATURE_TOOL,
         )
-        if not tool_uses:
+        if not inp:
             raise RuntimeError("Initializer did not call set_feature_list tool")
-        inp = tool_uses[0]["input"]
-        return inp["features"], inp.get("init_sh", _default_init_content(script_type))
+        return inp.get("features", []), inp.get("init_sh", _default_init_content(script_type))
 
     def _decompose_via_runner(self, planning_source: str) -> tuple[list[dict], str]:
         """Use the runner to decompose the brief.

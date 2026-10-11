@@ -65,6 +65,12 @@ class Orchestrator:
         "evaluator_model",
         "evaluator_pass_score",
         "evaluator_weights",
+        "evaluator_functionality_floor",
+        "read_only_roles",
+        "role_allowed_tools",
+        "test_command",
+        "api_tool_rounds",
+        "api_command_timeout_seconds",
         "max_iterations_per_feature",
         "runner_timeout_seconds",
         "planner_timeout_seconds",
@@ -504,6 +510,29 @@ class Orchestrator:
                 if eval_agent is not None:
                     self._account_tokens(eval_agent.usage.total_tokens)
 
+                if result.parse_failed:
+                    # P-07: ask once more before the iteration is counted.
+                    console.print(
+                        "  [yellow]Evaluator answer was not usable — asking once more "
+                        "before counting this iteration.[/yellow]"
+                    )
+                    previous_output = getattr(eval_agent, "last_raw_output", "") or ""
+
+                    def _reevaluate(runner):
+                        agent = EvaluatorAgent(self.config, runner=runner)
+                        eval_holder["agent"] = agent
+                        return agent.evaluate(
+                            feature=feature,
+                            generator_self_eval=self_eval,
+                            iteration=iteration,
+                            previous_output=previous_output,
+                        )
+
+                    result = self._with_role_fallback("evaluator", _reevaluate, protect_state=True)
+                    eval_agent = eval_holder.get("agent")
+                    if eval_agent is not None:
+                        self._account_tokens(eval_agent.usage.total_tokens)
+
                 self._print_eval_summary(result)
 
                 # Record
@@ -518,9 +547,7 @@ class Orchestrator:
                     break
 
                 evaluator_feedback = result.feedback
-                console.print(
-                    f"  [yellow]✗ Score {result.overall_score:.1f} < {self.config.evaluator_pass_score} — iterating[/yellow]"
-                )
+                console.print(f"  [yellow]✗ {self._failure_text(result)} — iterating[/yellow]")
 
                 # Check if we need a context reset
                 if self.should_reset():
@@ -941,11 +968,31 @@ class Orchestrator:
         )
 
     def _print_eval_summary(self, result: EvaluationResult) -> None:
+        if result.parse_failed:
+            console.print("    [yellow]No usable grade from the evaluator (counted as a failed iteration).[/yellow]")
+            return
         w = self.config.evaluator_weights
-        console.print(
+        floor = self.config.evaluator_functionality_floor
+        line = (
             f"    Design={result.design_quality:.1f}×{w.design_quality} "
             f"Originality={result.originality:.1f}×{w.originality} "
             f"Craft={result.craft:.1f}×{w.craft} "
             f"Functionality={result.functionality:.1f}×{w.functionality} "
             f"→ [bold]{result.overall_score:.2f}[/bold]/10"
         )
+        if result.functionality < floor:
+            line += f"  [red](functionality below the {floor:g} floor)[/red]"
+        console.print(line)
+
+    def _failure_text(self, result: EvaluationResult) -> str:
+        if result.parse_failed:
+            return "No usable grade"
+        if result.failure_reason:
+            return result.failure_reason.replace("_", " ")
+        reasons = []
+        if result.overall_score < self.config.evaluator_pass_score:
+            reasons.append(f"score {result.overall_score:.1f} < {self.config.evaluator_pass_score:g}")
+        floor = self.config.evaluator_functionality_floor
+        if result.functionality < floor:
+            reasons.append(f"functionality {result.functionality:.1f} < floor {floor:g}")
+        return ", ".join(reasons) or f"score {result.overall_score:.1f}"

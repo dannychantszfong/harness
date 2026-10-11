@@ -29,6 +29,7 @@ from harness.runners.base import (
     CodeRunner,
     PreflightResult,
     RunResult,
+    RunnerAccess,
     RunnerType,
     missing_cwd_result,
 )
@@ -122,17 +123,25 @@ class CodexRunner(CodeRunner):
             details=f"Binary: {path}  ({ver})   Model: {model}   Provider: {provider}",
         )
 
-    def _permission_args(self) -> list[str]:
+    @staticmethod
+    def _permission_args(access: Optional[RunnerAccess] = None) -> list[str]:
+        if access is not None and access.read_only:
+            # Codex has no per-tool allow-list; the sandbox is the boundary.
+            return ["--sandbox", "read-only"]
         return ["--dangerously-bypass-approvals-and-sandbox"]
 
-    def build_command(self, last_message_path: str) -> list[str]:
+    def build_command(
+        self,
+        last_message_path: str,
+        access: Optional[RunnerAccess] = None,
+    ) -> list[str]:
         cmd = [
             "codex",
             "exec",
             "--json",
             "--output-last-message",
             last_message_path,
-            *self._permission_args(),
+            *self._permission_args(access),
             "--skip-git-repo-check",
             "--color",
             "never",
@@ -154,6 +163,7 @@ class CodexRunner(CodeRunner):
         prompt: str,
         cwd: str,
         timeout_seconds: int | None = None,
+        access: Optional[RunnerAccess] = None,
     ) -> RunResult:
         timeout_seconds = self._timeout(timeout_seconds)
         missing = missing_cwd_result(cwd)
@@ -178,7 +188,7 @@ class CodexRunner(CodeRunner):
         os.close(fd)
         try:
             # Resolved path: npm installs `codex` as a .cmd shim on Windows.
-            cmd = [binary, *self.build_command(last_message_path)[1:]]
+            cmd = [binary, *self.build_command(last_message_path, access)[1:]]
             try:
                 with QuietAnimator.from_config(self.config, phase="coding"):
                     result = subprocess.run(

@@ -63,6 +63,7 @@ Rules:
 
 class ReviewerAgent(BaseAgent):
     role = "evaluator"  # reuse the evaluator model slot — same kind of task
+    access_role = "reviewer"  # writes REVIEW.md
 
     def run(self, **kwargs):  # pragma: no cover — interface stub
         raise NotImplementedError("Call review() directly.")

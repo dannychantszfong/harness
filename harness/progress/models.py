@@ -27,6 +27,11 @@ class EvaluationResult(BaseModel):
     # Set when the iteration failed before/without a real grade, e.g.
     # "generator_timeout". Such iterations still count against the budget.
     failure_reason: Optional[str] = None
+    # True when the evaluator's answer could not be read (P-07); the scores
+    # above are then 0, not a grade.
+    parse_failed: bool = False
+    # The overall the model itself reported — diagnostics only (P-05).
+    reported_overall: Optional[float] = None
 
 
 class SprintContract(BaseModel):

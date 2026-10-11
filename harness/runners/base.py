@@ -138,6 +138,46 @@ class RunResult:
     rate_limited: bool = False
 
 
+@dataclass(frozen=True)
+class RunnerAccess:
+    """What a runner session may do (C-06). None/default = full access.
+
+    read_only: no file writes — Claude Code runs with --permission-mode
+      dontAsk, an allow-list and Write/Edit disallowed; Codex runs in
+      --sandbox read-only.
+    allowed_tools: Claude Code permission rules for an allow-list session
+      (e.g. "Read", "Bash(git diff *)"). Non-empty → restricted session.
+    mcp_config: path to an MCP config JSON for this session (C-07).
+    """
+    read_only: bool = False
+    allowed_tools: tuple[str, ...] = ()
+    mcp_config: Optional[str] = None
+
+    @property
+    def restricted(self) -> bool:
+        return self.read_only or bool(self.allowed_tools)
+
+
+# Tools a read-only Claude Code session never gets, whatever the allow-list.
+WRITE_TOOLS: tuple[str, ...] = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def default_read_only_tools(config) -> list[str]:
+    """Read/search tools plus allow-listed commands: startup, tests, git diff/log.
+
+    Which of these the agent uses, and in what order, is its own judgement;
+    this is only the permission boundary.
+    """
+    tools = ["Read", "Grep", "Glob", "LS"]
+    commands = ["git diff", "git log", "git status", "git show"]
+    startup = getattr(config, "startup_command_for_platform", None)
+    test = getattr(config, "test_command", None)
+    commands += [c for c in (startup, test) if c]
+    for command in commands:
+        tools += [f"Bash({command})", f"Bash({command} *)"]
+    return tools
+
+
 @dataclass
 class PreflightResult:
     """Result of a runner pre-flight check."""
@@ -214,12 +254,26 @@ class CodeRunner(ABC):
         prompt: str,
         cwd: str,
         timeout_seconds: int | None = None,
+        access: Optional[RunnerAccess] = None,
     ) -> RunResult:
         """Run one complete implementation session for a single feature.
 
         timeout_seconds=None means "use config.runner_timeout_seconds".
+        access=None means full access (generator / initializer).
         """
         ...
+
+    @staticmethod
+    def _claude_permission_args(access: Optional[RunnerAccess]) -> list[str]:
+        """Claude Code CLI permission flags for a session (subprocess runner)."""
+        if access is None or not access.restricted:
+            return ["--dangerously-skip-permissions"]  # required for unattended use
+        args = ["--permission-mode", "dontAsk"]
+        if access.allowed_tools:
+            args += ["--allowedTools", *access.allowed_tools]
+        if access.read_only:
+            args += ["--disallowedTools", *WRITE_TOOLS]
+        return args
 
     def _timeout(self, timeout_seconds: int | None) -> int:
         if timeout_seconds:
