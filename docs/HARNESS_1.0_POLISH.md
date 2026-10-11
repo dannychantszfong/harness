@@ -326,7 +326,7 @@ Jira or any external backlog as source of truth · orchestrator / coder role spl
 
 ## 9. Implementation record (2026-10-11)
 
-Branch `harness-1.0`, one commit and tag per phase: `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`; `v1.0-a` (fork point for Harness 2.0) and `v1.0` were moved to the review-pass-2 commit, because R-02 changed the Phase A runner layer. Suite: 401 passed, 6 skipped (macOS-only launchd tests, POSIX/Linux-only signal tests, a symlink test where symlinks are not permitted, the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`; the packaging build passes separately (`HARNESS_PACKAGING_TESTS=1`).
+Branch `harness-1.0`, one commit and tag per phase: `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`; `v1.0-a` (fork point for Harness 2.0) and `v1.0` were moved to the review-pass-2 commit, because R-02 changed the Phase A runner layer. Suite: 402 passed, 6 skipped (macOS-only launchd tests, POSIX/Linux-only signal tests, a symlink test where symlinks are not permitted, the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`; the packaging build passes separately (`HARNESS_PACKAGING_TESTS=1`).
 
 **Scope notes**
 
@@ -343,7 +343,7 @@ Branch `harness-1.0`, one commit and tag per phase: `v1.0-b`, `v1.0-c`, `v1.0-d`
 - R-01: a passing feature whose Harness commit failed (rejecting pre-commit hook, or Harness killed before committing) could be deleted by a later exhausted attempt's reset. Harness now commits the working tree before recording a feature's base (Harness state files alone need no commit), records that commit for passing features that lacked one, refuses a base when that commit fails, and never resets while a passing feature has no commit (ADR-015).
 - R-02: agent sessions survived SIGTERM/SIGHUP to Harness (a Phase A regression from `start_new_session`). SIGTERM/SIGHUP now take the same kill-the-tree path as Ctrl+C; Linux sessions get `PR_SET_PDEATHSIG`; on Windows Harness runs in a kill-on-close job object (ADR-017).
 - R-03: no single-instance guard. `run`/`resume`/`import`/`init`/`plan` take an OS lock on `.harness/run.lock` before writing anything, and a run cancels a pending auto-resume job (ADR-017).
-- R-04: nested repositories from scaffolders were committed as dangling gitlinks and survived resets; their `.git` now moves to `.git/harness/nested-repos/` and the files are committed as plain files.
+- R-04: nested repositories from scaffolders were committed as dangling gitlinks and survived resets; their `.git` now moves to `.git/harness/nested-repos/` and the files are committed as plain files — for an exhausted attempt before its git-ignored paths are recorded, so the nested repo's own ignores (`node_modules`) stay out of later commits (found in the owner's replay).
 - R-05: generator runner failures were graded and spent the feature budget. They are retried once without counting, then the run stops with the feature in progress; a turn-limit end is recorded like a timeout.
 - R-06: api-mode `search` followed symlinks out of the project; git short-option bundles (`-pO<file>`) and long-option abbreviations (`--outp=`) are refused too.
 - R-07: `.gitattributes` (`* text=auto eol=lf`), CI also runs on pushes to `harness-*` branches, `LS` dropped from the read-only tool list.

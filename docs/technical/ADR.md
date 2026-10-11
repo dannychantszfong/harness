@@ -377,7 +377,11 @@ working tree and the next feature started on a broken baseline.
   that run `git init`) are made plain directories: the nested `.git` moves
   to `<git-dir>/harness/nested-repos/`. Otherwise git records a gitlink with
   no `.gitmodules` (clones break) that `reset --hard` cannot remove.
-  Submodules declared in `.gitmodules` are left alone.
+  Submodules declared in `.gitmodules` are left alone. For an exhausted
+  attempt this happens before Harness records which untracked paths are
+  git-ignored: git does not look inside a nested repo, so what its own
+  `.gitignore` excludes (`app/node_modules`) would otherwise escape
+  `.git/info/exclude` once the reset removes that `.gitignore`.
 
 ### Rationale
 "Revert to the last stable state, but keep the failed attempt for later

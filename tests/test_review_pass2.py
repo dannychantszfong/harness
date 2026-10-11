@@ -415,6 +415,39 @@ def test_nested_repo_from_an_exhausted_attempt_is_removed_by_the_reset(tmp_path)
 
 
 @needs_git
+def test_nested_repos_ignored_files_stay_out_of_git_after_the_reset(tmp_path):
+    """The nested repo's own .gitignore goes away with the reset; what it
+    ignored (node_modules) must not ride along in the next passing commit."""
+    config = _project(tmp_path, [Feature(id="f1", name="A", description="a"),
+                                 Feature(id="f2", name="B", description="b", priority=1)],
+                      max_iterations_per_feature=1)
+    project = Path(config.output_dir)
+
+    def generate(feature, **kw):
+        if feature.id == "f1":
+            app = project / "app"
+            (app / "node_modules").mkdir(parents=True)
+            (app / ".gitignore").write_text("node_modules/\n")
+            (app / "node_modules" / "dep.js").write_text("module.exports = 1\n")
+            (app / "main.js").write_text("require('dep')\n")
+            _git(app, "init", "-q")
+            _git(app, "add", "-A")
+            _git(app, "commit", "-q", "-m", "scaffold")
+        else:
+            (project / "b.py").write_text("b")
+        return "x"
+
+    _run_loop(config, generate, [_eval(3, False), _eval(9, True)])
+
+    f2 = ProgressTracker(config).load().get_feature("f2")
+    assert f2.status == FeatureStatus.PASSING and f2.commit_sha
+    tree = _git(project, "ls-tree", "-r", "--name-only", f2.commit_sha).splitlines()
+    assert not any("node_modules" in p for p in tree)
+    assert (project / "app" / "node_modules" / "dep.js").exists()  # nothing deleted
+    assert "node_modules" not in _git(project, "status", "--porcelain")
+
+
+@needs_git
 def test_declared_submodules_are_left_alone(tmp_path):
     _git(tmp_path, "init", "-q")
     (tmp_path / "vendor").mkdir()

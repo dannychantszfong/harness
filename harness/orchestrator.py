@@ -770,6 +770,11 @@ class Orchestrator:
 
     def _commit_all(self, message: str) -> str | None:
         """commit_all, reporting nested repositories it had to absorb (R-04)."""
+        self._absorb_nested_repos()
+        return commit_all(Path(self.config.output_dir), message)
+
+    def _absorb_nested_repos(self) -> None:
+        """absorb_nested_repos, with a note for each repository it handled."""
         project_dir = Path(self.config.output_dir)
         if is_git_repo(project_dir):
             for path, how in absorb_nested_repos(project_dir):
@@ -784,7 +789,6 @@ class Orchestrator:
                         f"  [yellow]{escape(path)}/ is a nested git repository that could not be "
                         "absorbed; kept out of git via .git/info/exclude.[/yellow]"
                     )
-        return commit_all(project_dir, message)
 
     def _fresh_base(self, progress: ProjectProgress, feature_id: str) -> tuple[ProjectProgress, str | None]:
         """The commit a feature starting now may later be reset to (ADR-015).
@@ -857,6 +861,11 @@ class Orchestrator:
         if is_git_repo(project_dir):
             snapshot = self._snapshot_state_files()
             try:
+                # Absorb nested repos first: git does not look inside one, so
+                # what its own .gitignore excludes (app/node_modules) would be
+                # missing here — and no longer ignored once the reset removes
+                # that .gitignore.
+                self._absorb_nested_repos()
                 ignored_before = ignored_untracked_paths(project_dir)
                 attempt_commit = self._commit_all(
                     f"wip({feature.id}): exhausted attempt {attempt_number} (preserved by Harness)",
