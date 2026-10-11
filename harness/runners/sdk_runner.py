@@ -109,7 +109,10 @@ class SDKRunner(CodeRunner):
             if access.read_only:
                 kwargs["disallowed_tools"] = list(WRITE_TOOLS)
         if access is not None and access.mcp_config:
-            kwargs["mcp_servers"] = access.mcp_config
+            # A dict is the form every claude-code-sdk release accepts.
+            from harness.agents.browser import load_mcp_servers
+
+            kwargs["mcp_servers"] = load_mcp_servers(access.mcp_config)
         return kwargs
 
     def implement(

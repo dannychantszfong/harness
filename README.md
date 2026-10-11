@@ -5,118 +5,102 @@ A production orchestration framework for long-running AI coding agents, implemen
 - [Harness Design for Long-Running Application Development](https://www.anthropic.com/engineering/harness-design-long-running-apps)
 - [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
-Built around **2 coding agents** (Claude Code and Codex) with **6 supported billing/auth modes** — Claude subscription, Claude API, Codex subscription, OpenAI API, Gemini API, OpenRouter API. Direct API providers are not standalone runners; they plug into Claude Code or Codex as the underlying model.
-
-**Core idea:** the harness is built around coding-agent runtimes, not raw model calls. Claude Code and Codex provide the agent architecture — tools, file edits, shell execution, git workflow, and session behavior. The selected model is the engine inside that frame, and users can choose that engine before a project starts.
+**One paragraph in, a working project out:** a planner expands your brief into a spec (you confirm it interactively), an initializer turns the spec into an ordered list of atomic features, and every feature goes through a generator ↔ evaluator loop until a weighted score clears the bar. State lives in files, so a run can be killed and resumed at any point; usage caps are detected and the run resumes itself after the reset. Everything runs through a coding-agent runtime — **Claude Code** or **Codex** — so a subscription is the only requirement.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Create conda environment
-conda create -n harness python=3.12 -y && conda activate harness
-pip install -e ".[all-providers]"
+# 1. Install (Python 3.11+). Any virtualenv or conda env works.
+pip install .                       # or: pip install -e ".[dev]" for development
+pip install ".[sdk]"                # optional: the Claude Code SDK runner
 
-# 2. Start a new project — interactive, no config editing needed
-harness setup                  # optional: first-time runner rotation policy
-harness new --claude-code        # Claude Code (subscription by default)
-harness new --claude-sdk         # Claude Code via SDK (structured output)
-harness new --claude-code --model sonnet
-harness new --codex --model gpt-5.2
-harness new                      # shows interactive runner menu
-harness new --claude-code --github-repo owner/my-app
+# 2. Optional, once: runner rotation policy + tool check (gh, claude, codex)
+harness setup
 
-# 3. Resume / import existing work
+# 3. Start a project — interactive, no config editing needed
+harness new --claude-code           # Claude Code CLI on your Claude subscription
+harness new --codex --model gpt-5.2 # Codex CLI on your OpenAI subscription
+harness new                         # interactive runner menu
+
+# 4. Pick up where it stopped — from any working directory
 harness resume output/my_app_a3f8c21b
-harness import ../my-other-repo  # detect stage, run from the right phase
-harness import ../my-other-repo --github-repo owner/my-other-repo
+harness status output/my_app_a3f8c21b
 
-# 4. Other commands
-harness runners                  # list runners with requirements
-harness animation-theme "moonlit ritual" --runner codex
-harness status output/my_app_a3f8c21b/harness_config.json
+# 5. Bring an existing repo in at the right phase
+harness import ../my-other-repo
 ```
+
+You need the coding-agent CLI for the runner you pick (`claude` or `codex`) on `PATH`, signed in. `gh` is needed only for per-project GitHub sync.
 
 ---
 
-## Architecture
+## How it works
 
 ```
 harness new
-  │
-  ├─ Prompts: project name, brief
-  ├─ Requirement Alignment (planner ↔ user, back-and-forth until confirmed)
-  ├─ Runner selection (flag / menu)
-  └─ Saves config to ./output/<slug>_<id>/harness_config.json
-        │
-        ▼
-Phase 1 — Initializer
-  └─ Decomposes brief into feature list, writes platform startup script, git init
+  ├─ project name + brief
+  ├─ Requirement alignment: planner drafts a spec ↔ you give feedback, until confirmed
+  └─ output/<slug>_<id>/  (its own git repo)  ← harness_config.json, spec.md
 
-Phase 2 — Planner
-  └─ Expands brief into full product spec (skipped if already confirmed)
-
-Phase 3 — Feature Loop (GAN-style)
-  ┌──────────────────────────────────────────────────────────┐
-  │  Sprint Contract: generator proposes acceptance criteria  │
-  │        ↓                                                  │
-  │  Generator implements feature via Runner                  │
-  │        ↓ self-eval text                                   │
-  │  Evaluator grades (design / originality / craft / fn)    │
-  │        ↓                                                  │
-  │  score ≥ threshold → git commit → next feature            │
-  │  score < threshold → feedback injected → iterate (≤ N)   │
-  └──────────────────────────────────────────────────────────┘
-        │
-  Context Reset (if token budget exceeded)
-  └─ HandoffDocument → fresh session with preamble
+Phase 1 — Initializer   features.json (50–200 atomic features), init script, first commit
+Phase 2 — Planner       skipped when the spec was confirmed during `harness new`
+Phase 3 — Feature loop, one feature at a time, highest priority first:
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ Sprint contract: acceptance criteria + out of scope (read-only call) │
+  │ Generator implements the feature in the project dir                  │
+  │ Evaluator inspects + grades (read-only session)                      │
+  │   Harness computes the weighted score                                │
+  │   pass = score ≥ pass_score AND functionality ≥ floor                │
+  │ pass → Harness commits "feat(<id>): <name> — score <x>" → next       │
+  │ fail → feedback to the generator → iterate (budget per feature)      │
+  │ budget exhausted → attempt kept on a branch, code reverted, notes    │
+  └──────────────────────────────────────────────────────────────────────┘
+  Context budget exceeded (real token counts) → handoff file → fresh session
+  Usage cap hit → rotate to the next runner profile, or schedule auto-resume
 ```
 
-### Key Design Decisions
+### Key design decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| **Context resets over compaction** | Eliminates "context anxiety" — models wrap up prematurely near token limits |
-| **GAN-style generator + evaluator** | Self-evaluation bias is intractable; adversarial separation drives quality |
-| **One feature per session** | Prevents context exhaustion and undocumented half-finished work |
-| **File-based state** | `features.json` is the source of truth — restartable, human-inspectable |
-| **Sprint contracts** | Generator and evaluator agree on "done" criteria before implementation |
-| **Two orchestration modes** | Pure subscription (no API key) or API orchestration — user's choice |
-| **Two coding agents, six billing modes** | All execution flows through Claude Code or Codex; API providers plug in as the model |
-| **Independent output repos** | The Harness repo ignores `output/`; each generated/imported project owns its own git repo and optional GitHub remote |
+Every row is active in the default configuration.
+
+| Decision | What Harness does |
+|---|---|
+| **Context resets over compaction** | Token usage reported by Claude Code / Codex is counted; past `context_reset_threshold_tokens` Harness writes `handoff_session_NNNN.json` and the next session starts from it (ADR-001). |
+| **Separate generator and evaluator** | The evaluator is a different session, read-only, told not to trust the generator's self-report (ADR-002). |
+| **Harness owns the verdict** | The overall score is computed by Harness from the four sub-scores and your weights; a feature that does not work (functionality below the floor) never passes, however pretty it is (ADR-013). |
+| **One feature per session** | The generator is told to work only on the named feature (ADR-003). |
+| **File-based, restartable state** | `features.json` is the source of truth. Interrupted features resume first, failing features are retried while budget remains, a corrupt file is backed up and never overwritten (ADR-004). |
+| **Sprint contracts** | Before each feature, the generator proposes acceptance criteria and out-of-scope items; the evaluator grades against them (ADR-006). |
+| **Recovery point per feature** | Harness commits every passing feature itself. An exhausted feature's code is preserved on `harness/attempt/<id>/<n>` and the working branch is reset to the last stable state; later attempts get the lessons (ADR-015). |
+| **Two coding agents, subscription first** | All execution flows through Claude Code or Codex; API providers plug in as the model (ADR-008). |
+| **Independent output repos** | The Harness repo ignores `output/`; every project owns its git repo and optional GitHub remote. |
 
 ---
 
-## Coding agents and modes
+## Coding agents and billing modes
 
-The harness has **two coding agents** that drive all implementation work, and **six supported modes** for paying/authenticating the model behind them. Direct API providers (Anthropic, OpenAI, Gemini, OpenRouter) are not standalone runners — they plug into one of the two agents via env vars.
-
-### The two agents
-
-| Agent | Internal runners | Capabilities |
+| Agent | Runner | Notes |
 |---|---|---|
-| **Claude Code** | `subprocess` (CLI), `sdk` (Python SDK) | Full file I/O, shell, git, multi-turn tool use |
-| **Codex** | `codex` (CLI) | Full file I/O, shell, git, multi-turn tool use |
+| **Claude Code** | `subprocess` | `claude -p --output-format json`; the default |
+| **Claude Code** | `sdk` | Python `claude-code-sdk` (pinned 0.0.25, ADR-014); streams tool calls |
+| **Codex** | `codex` | `codex exec --json` |
 
-`subprocess` and `sdk` are two transports onto the same Claude Code agent — pick `sdk` when you want streamed tool-call telemetry; pick `subprocess` for the lighter setup.
-
-### The six modes
-
-| # | Mode | Agent used | Auth source | Notes |
+| # | Mode | Agent | Auth | Status |
 |---|---|---|---|---|
-| 1 | **Claude subscription** | Claude Code | Pro / Max plan | Default for `--claude-code` and `--claude-sdk`. No env var needed. |
-| 2 | **Claude API** | Claude Code | `ANTHROPIC_API_KEY` | Pay-per-token through the same Claude Code agent. |
-| 3 | **Codex subscription** | Codex | OpenAI Plus subscription | Default for `--codex`. |
-| 4 | **OpenAI API** | Codex | `OPENAI_API_KEY` | Pay-per-token through the Codex agent. |
-| 5 | **Gemini API** | Codex (custom provider) or Claude Code (via OpenRouter) | `GEMINI_API_KEY` | Routed through one of the two agents. |
-| 6 | **OpenRouter API** | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` | OpenRouter's OpenAI-compatible Anthropic endpoint. Use for any model OpenRouter exposes. |
+| 1 | Claude subscription | Claude Code | Pro / Max plan, no env var | default for `--claude-code` / `--claude-sdk` |
+| 2 | Claude API | Claude Code | `ANTHROPIC_API_KEY` | |
+| 3 | Codex subscription | Codex | signed-in Codex CLI | default for `--codex` |
+| 4 | OpenAI API | Codex | `OPENAI_API_KEY` | |
+| 5 | Gemini API | Codex (custom provider) or Claude Code via OpenRouter | `GEMINI_API_KEY` | documented, **not verified** |
+| 6 | OpenRouter | Claude Code | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY` | |
 
-The harness does **not** auto-export these env vars; set them in your shell, in `direnv`, or in a project's `.env` and Claude Code / Codex will pick them up.
+Harness does not export these variables; set them in your shell (or `direnv`). `--model` picks the model inside the agent (`harness new --claude-code --model sonnet`); it is saved as `code_runner_model`.
 
-### First-Time Setup and Runner Rotation
+### Runner rotation (`harness setup`)
 
-`harness setup` saves a reusable runner policy at `~/.harness/setup.json`. New and imported projects copy that policy into `harness_config.json`, so the workflow can rotate from one coding agent to the next when a usage cap is hit.
+`harness setup` verifies `gh` and the coding-agent CLIs, then saves a policy to `~/.harness/setup.json` that new projects copy:
 
 ```bash
 harness setup \
@@ -125,250 +109,128 @@ harness setup \
   --profile claude-openrouter:subprocess:anthropic/claude-sonnet-4-6:openrouter \
   --profile-env claude-openrouter:ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
   --profile-env 'claude-openrouter:ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY' \
-  --planner-order codex,claude \
   --generator-order claude,codex,claude-openrouter \
   --evaluator-order codex,claude-openrouter
 ```
 
-Each role order is a whitelist and priority list. For example, the generator can start on Claude Code subscription, fall back to Codex subscription, then fall back to Claude Code routed through OpenRouter. Env values beginning with `$` are expanded at runtime, so the setup file can reference secrets without storing them directly.
+When a runner reports a usage cap, the role moves to the next profile in its order (ADR-011). Before the first feature, Harness preflights the first profile of every role in use, so a missing binary fails immediately rather than mid-run. A profile only inherits `code_runner_model` when it uses the same runtime: an `opus` alias is never handed to Codex.
 
-### Picking a mode
+### Orchestration modes
 
-```bash
-# Claude subscription — no env, no key
-harness new --claude-code
+| Mode | Planner + evaluator | API key | How |
+|---|---|---|---|
+| `runner` (default) | the coding-agent runner | none | default |
+| `api` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `harness new --with-api` |
 
-# Claude API
-ANTHROPIC_API_KEY=... harness new --claude-code
-
-# Codex subscription
-harness new --codex
-
-# OpenAI API
-OPENAI_API_KEY=... harness new --codex
-
-# OpenRouter API (route Claude Code through OpenRouter)
-ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
-ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY \
-harness new --claude-code --model anthropic/claude-sonnet-4-6
-```
-
-### Coding Agent Model Selection
-
-For Claude Code and Codex runners, `--model` selects the model used inside the coding agent runtime:
-
-```bash
-harness new --claude-code --model sonnet
-harness new --claude-sdk --model claude-sonnet-4-6
-harness new --codex --model gpt-5.2
-```
-
-If you omit `--model`, `harness new` asks once during setup. Press Enter to use the runner's own default. The selected value is saved as `code_runner_model` in `harness_config.json`.
-
-Codex local/open-source routing can be configured in `harness_config.json`:
-
-```json
-{
-  "code_runner": "codex",
-  "code_runner_model": "qwen2.5-coder",
-  "codex_oss": true,
-  "codex_local_provider": "ollama"
-}
-```
+In `api` mode the evaluator still inspects the project: it runs a bounded tool loop (`read_file`, `list_files`, `search`, and `run_command` for the startup command, your `test_command`, and `git diff/log/status/show`), at most `api_tool_rounds` rounds, before it must submit scores (ADR-016). `harness setup` never switches a project you created in `api` mode back to `runner` mode.
 
 ---
 
-## Orchestration Modes
+## Evaluation
 
-The **orchestration mode** controls how the **planner** and **evaluator** agents run (the generator always uses the agent you selected):
+Four dimensions, each scored 1–10: design quality, originality, craft, functionality. Defaults:
 
-| Mode | Planner + Evaluator | API key needed? | Set via |
-|------|--------------------|-----------------|----|
-| `runner` | Same agent as generator | **No** — pure subscription | Default |
-| `api` | Anthropic API directly | **Yes** — `ANTHROPIC_API_KEY` | `--with-api` flag |
+| Setting | Default | Meaning |
+|---|---|---|
+| `evaluator_weights` | 0.30 / 0.30 / 0.25 / 0.15 | must sum to 1.0, otherwise the config fails to load |
+| `evaluator_pass_score` | 8.0 | weighted score needed to pass |
+| `evaluator_functionality_floor` | 6.0 | functionality needed to pass, whatever the weighted score |
+| `max_iterations_per_feature` | 15 | budget per feature, across runs |
 
-```bash
-# Pure subscription — no API key at all
-harness new --claude-code
+The weights in the evaluator's prompt are the configured ones. Out-of-range scores are clamped to 1–10. If the evaluator's answer cannot be read, that is recorded as an explicit "no usable grade" (never a silent 5.0), and Harness asks once more before counting the iteration.
 
-# Split: generator = Claude Code CLI, planner/evaluator = Anthropic API
-harness new --claude-code --with-api
-```
-
-The runner status banner at startup always shows which mode is active:
-
-```
-╭── ✓ Runner ready  (subprocess) ──────────────────────────────────────╮
-│ Claude Code CLI  ·  subscription billing  ·  full file I/O           │
-│ Binary: /usr/local/bin/claude  (2.1.98 (Claude Code))                │
-│                                                                       │
-│ Orchestration: runner mode — planner + evaluator use this runner too │
-│                              (no API key needed)                      │
-╰───────────────────────────────────────────────────────────────────────╯
-```
-
-### Quiet Progress Animation
-
-When the harness is waiting on a silent blocking step, it shows a small terminal pulse instead of looking frozen. The default uses rotating symbols plus short phrase transitions:
-
-```text
-✧ S
-✦ Scrying
-✨ Inscribing
-```
-
-Built-in animation packs: `sparkle`, `bloom`, `snow`, `braille`, `orbit`, `pulse`, `dots`, `moon`, `bars`, `clock`, `wave`, `tech`. The playful phrase style uses restrained magical verbs like `Scrying`, `Inscribing`, `Warding`, and `Attuning`.
-
-To change the playful verb theme, ask one of your signed-in coding agents to patch the local Harness checkout:
-
-```bash
-harness animation-theme "frostbound library" --runner codex --model gpt-5.2
-harness animation-theme "quiet moonlit ritual" --runner subprocess
-```
-
-The command launches Claude Code or Codex with a narrow guide for editing `PHRASES["playful"]` in `harness/ui/spinner.py`. It keeps the output as single verbs, so the spinner stays like `Scrying`, not `Scrying with Claude Code`.
-
-The animation runs only in interactive terminals and writes to stderr, so logs and piped output stay clean. Disable it with:
-
-```bash
-export HARNESS_NO_SPINNER=1
-```
+**When a feature cannot pass.** After the budget is used up, Harness commits the attempt onto `harness/attempt/<feature-id>/<n>` and writes `.harness/attempts/<feature-id>.md` (every score, all feedback, the weakest dimension, the generator's last self-evaluation). It then resets the working branch to the commit the feature started from, so the next feature builds on a passing baseline. The final panel, `progress.md` and `harness status` list exhausted features. Raise `max_iterations_per_feature` or edit the feature's description, then run `harness resume`: the retry gets the notes injected as lessons.
 
 ---
 
-## Starting a New Project
+## Resuming, auto-resume and state
 
-`harness new` replaces manual config editing with an interactive flow:
-
-```
-$ harness new --claude-code
-
-╭─ Agent Harness ────────╮
-│ New Project Setup       │
-╰─ Let's build something ─╯
-
-Project name: My Todo App
-What would you like to build?: A todo app with auth and due dates
-
-Project ID: a3f8c21b
-Output dir: ./output/my_todo_app_a3f8c21b
-
-── Requirement Alignment ──
-The planner will draft a spec. Review it and give feedback, or press Enter to confirm.
-
-── PLANNER ──
-(draft spec appears here…)
-
-╭── Draft Spec (round 1) ──────────╮
-│ ## My Todo App                    │
-│ ### In Scope                      │
-│ …                                 │
-╰───────────────────────────────────╯
-
-Feedback (press Enter to confirm, or describe what to change): add dark mode support
-
-(planner refines based on your feedback…)
-
-Feedback (press Enter to confirm, or describe what to change): ↵
-✓ Requirements confirmed.
-
-Config saved to ./output/my_todo_app_a3f8c21b/harness_config.json
+```bash
+harness resume output/my_app_a3f8c21b      # works from any directory
 ```
 
-The confirmed spec is injected directly into the orchestrator, skipping an extra planner API call.
+`harness resume` prints what it is about to do: passing, in-progress, pending and exhausted counts, the feature it picks up (and at which iteration), and whether a handoff applies. The directory you pass is the project; a relative `output_dir` recorded by an older Harness is corrected and saved.
+
+| Situation | What happens |
+|---|---|
+| Killed mid-feature | the interrupted feature resumes first, with its last evaluator feedback |
+| Feature failed, budget left | retried, continuing its iteration count |
+| `features.json` corrupt | copied to `features.json.corrupt-<timestamp>`; the run stops and nothing is overwritten |
+| An agent edits `features.json` | restored from Harness's copy, with a warning |
+| Usage cap with a reset time | a one-shot OS job runs `harness resume <dir>` after the reset (`auto_resume_on_rate_limit`) |
+
+Auto-resume backends: **macOS launchd**; **Windows Task Scheduler** (validated on a real host); **Linux systemd user timer** (experimental, needs a user D-Bus session; Harness says so instead of failing silently). The scheduled wrappers carry the `PATH` from scheduling time, never secrets. See the [runbook](docs/operational/runbook.md#auto-resume-backends).
+
+## Tokens and cost
+
+Every runner session's usage (Claude Code JSON output, Codex event stream, SDK result) is added to the feature and project totals:
+
+```
+$ harness status output/my_app_a3f8c21b
+Progress: 40.0% (4/10 features)
+Usage: 1,284,113 tokens · cost: subscription (≈$18.40 at API prices)
+  ✅ [f1] User sign-up (8.6/10 · 212,904 tok, $3.10)
+```
+
+On a subscription the dollar figure is the runtime's API-price equivalent, not what you are billed. Tokens are new context (uncached input, cache writes, output); cache reads are not counted toward the reset budget.
 
 ---
 
-## Per-Project GitHub Sync
+## Safety
 
-Harness does not store generated apps inside the Harness git history. `output/` is ignored, and every generated or copied project is treated as its own independent repository.
+Read this before an unattended run.
 
-To create or reuse a GitHub repo for the project before the workflow starts:
+- **The generator and initializer run with permissions bypassed** (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`) inside the project directory. They can run any command your user can. For unattended runs, use a container, a VM or a dedicated OS user without access to your other files and credentials.
+- **Planner, evaluator and sprint-contract sessions are read-only** by default (`read_only_roles`): on Claude Code, `--permission-mode dontAsk` with an allow-list (Read/Grep/Glob, plus the startup command, `test_command` and `git diff/log/status/show`) and Write/Edit disallowed; on Codex, `--sandbox read-only`. Tune per role with `role_allowed_tools`.
+- **No literal secrets in `harness_config.json`.** It is committed to the project repo and may be pushed to GitHub. API-key fields and secret-looking env values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) must be references such as `"$OPENROUTER_API_KEY"`; a literal value is rejected on load and on save.
+- Harness keeps `.auto_resume.*` and `auto_resume.log` out of the project's commits, and git operations only ever run in the project's own repository root.
+
+---
+
+## Per-project GitHub sync
 
 ```bash
-# Create/check owner/my-app with gh, then push after init and each passing feature
-harness new --claude-code --github-repo owner/my-app
-
-# Import a local repo into output/, then push that copy to its own GitHub repo
-harness import ../my-app --github-repo owner/my-app
-
-# Use an existing remote URL instead of gh repo creation
+harness new --claude-code --github-repo owner/my-app          # gh creates/reuses the repo
+harness import ../my-app --github-repo owner/my-app            # push the imported copy
 harness new --codex --git-remote git@github.com:owner/my-app.git
-
-# Store the remote setting but do not auto-push during the run
 harness new --claude-code --github-repo owner/my-app --no-git-push
 ```
 
-`--github-repo` requires the GitHub CLI (`gh`) to be installed and authenticated. It sets `origin` to `https://github.com/owner/repo.git`; use `--git-remote` for SSH or any custom remote URL.
+Harness pushes after initialization and after each passing feature. `--github-repo` needs `gh` installed and authenticated; a missing or unauthenticated `gh` stops the run, while network hiccups are warnings.
 
 ---
 
-## Resuming a Project
+## Experimental
+
+- **Browser verification** (`evaluator_browser_verification: true`): runner-mode evaluator sessions on Claude Code get a Playwright MCP server (`npx -y @playwright/mcp@latest`, or your own `evaluator_mcp_config`) and are told to exercise the acceptance criteria in the running app. Preflight checks the server command is on `PATH`. Codex evaluators run without it, with a warning. Not part of the 1.0 guarantee.
+- **systemd auto-resume backend**: see above.
+
+---
+
+## Configuration reference
+
+`harness new` writes `output/<slug>_<id>/harness_config.json`. To write one by hand, a minimal YAML is enough (see `examples/`):
+
+```yaml
+project_name: my-app
+brief: A task manager with projects, due dates and a Kanban board.
+output_dir: ./output/my_app
+orchestration_mode: runner      # the default
+code_runner: subprocess         # subprocess | sdk | codex
+```
 
 ```bash
-harness run output/my_todo_app_a3f8c21b/harness_config.json
-
-# Override the runner (e.g. switch from SDK to subprocess)
-harness run output/my_todo_app_a3f8c21b/harness_config.json --runner subprocess
+harness run examples/web_app.yaml
 ```
 
-The harness is fully restartable. It picks up from `features.json` — features already passing are skipped.
-
----
-
-## Project Structure
-
-```
-agent-harness/
-├── harness/
-│   ├── agents/
-│   │   ├── base.py              # Streaming, prompt caching, _call_via_runner helper
-│   │   ├── initializer.py       # One-time setup: features.json, startup script, git commit
-│   │   ├── planner.py           # Brief → spec; align_requirements() back-and-forth loop
-│   │   ├── generator.py         # Feature implementation (delegates to runner)
-│   │   └── evaluator.py         # Adversarial grader — tool use (api) or XML parsing (runner)
-│   ├── runners/
-│   │   ├── base.py              # CodeRunner ABC, RunResult, RunnerType, PreflightResult
-│   │   ├── subprocess_runner.py # claude --print       (Claude Code via CLI)
-│   │   ├── sdk_runner.py        # claude_code_sdk      (Claude Code via Python SDK)
-│   │   └── codex_runner.py      # codex CLI            (Codex)
-│   ├── context/
-│   │   ├── handoff.py           # HandoffDocument: cross-session state transfer
-│   │   └── reset.py             # Token budget tracking + context reset logic
-│   ├── progress/
-│   │   ├── models.py            # Feature, ProjectProgress, EvaluationResult (Pydantic)
-│   │   └── tracker.py           # Read/write features.json + progress.md
-│   ├── session/
-│   │   └── opener.py            # Session startup context builder
-│   ├── config.py                # HarnessConfig: JSON-backed, includes orchestration_mode
-│   └── orchestrator.py          # Main loop: phases, GAN loop, context resets, runner status
-├── tests/
-│   ├── test_runners.py          # Runner factory + the three coding-agent runners
-│   ├── test_orchestrator.py     # Phase sequencing, GAN loop, max-iteration guard
-│   ├── test_progress.py         # Feature model, tracker CRUD
-│   └── test_handoff.py          # HandoffDocument save/load/render
-├── docs/
-│   ├── diagrams/                # draw.io architecture, sequence, state machine diagrams
-│   ├── product/                 # PRD, user stories
-│   ├── technical/               # Architecture, API reference, ADRs
-│   ├── operational/             # Runbook, deployment guide
-│   └── testing/                 # Test plan, test cases
-├── cli.py
-└── pyproject.toml
-```
-
----
-
-## Configuration Reference
-
-Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`. You can also write it manually.
+All fields, with defaults:
 
 ```json
 {
   "project_name": "my-app",
-  "project_id": "a3f8c21b",
   "brief": "One to four sentences describing what to build.",
-  "output_dir": "./output/my_app_a3f8c21b",
+  "output_dir": "/home/me/harness/output/my_app_a3f8c21b",
+  "project_id": "a3f8c21b",
   "orchestration_mode": "runner",
   "code_runner": "subprocess",
   "code_runner_model": "sonnet",
@@ -376,92 +238,117 @@ Saved automatically to `output/<slug>_<id>/harness_config.json` by `harness new`
   "codex_local_provider": null,
   "code_runner_extra_args": [],
   "active_runner_env": {},
+
+  "runner_timeout_seconds": 1800,
+  "planner_timeout_seconds": null,
+  "evaluator_timeout_seconds": null,
+  "sdk_max_turns": 100,
+
+  "max_iterations_per_feature": 15,
+  "evaluator_pass_score": 8.0,
+  "evaluator_weights": {"design_quality": 0.3, "originality": 0.3, "craft": 0.25, "functionality": 0.15},
+  "evaluator_functionality_floor": 6.0,
+  "sprint_contract_enabled": true,
+  "context_reset_threshold_tokens": 150000,
+
+  "read_only_roles": ["planner", "evaluator", "contract"],
+  "role_allowed_tools": {},
+  "test_command": null,
+  "evaluator_browser_verification": false,
+  "evaluator_mcp_config": null,
+  "api_tool_rounds": 20,
+  "api_command_timeout_seconds": 120,
+
+  "features_file": "features.json",
+  "progress_file": "progress.md",
+  "spec_file": "spec.md",
   "init_script": null,
   "init_script_type": null,
   "startup_command": null,
+
+  "auto_resume_on_rate_limit": true,
   "runner_profiles": [],
   "planner_runner_order": [],
   "generator_runner_order": [],
   "evaluator_runner_order": [],
   "reviewer_runner_order": [],
   "fallback_on_rate_limit": true,
-  "progress_animation": "sparkle",
-  "progress_phrase_style": "playful",
-  "progress_text_effect": "typewriter",
+
   "project_git_push": false,
   "project_git_branch": "main",
   "project_git_remote": null,
   "project_github_repo": null,
   "project_github_private": true,
-  "openai_api_key": null,
-  "gemini_api_key": null,
-  "openrouter_api_key": null,
+
+  "progress_animation": "sparkle",
+  "progress_phrase_style": "playful",
+  "progress_text_effect": "typewriter",
+
   "planner_model": "claude-opus-4-7",
   "generator_model": "claude-opus-4-7",
   "evaluator_model": "claude-opus-4-7",
-  "max_iterations_per_feature": 15,
-  "evaluator_pass_score": 8.0,
-  "sprint_contract_enabled": true,
-  "evaluator_weights": {
-    "design_quality": 0.30,
-    "originality": 0.30,
-    "craft": 0.25,
-    "functionality": 0.15
-  },
-  "context_reset_threshold_tokens": 150000
+  "openai_api_key": null,
+  "gemini_api_key": null,
+  "openrouter_api_key": null
 }
 ```
 
----
-
-## Environment Variables
-
-| Variable | Mode |
-|----------|------|
-| *(none)* | Claude subscription, Codex subscription |
-| `ANTHROPIC_API_KEY` | Claude API (Claude Code uses it instead of subscription auth), or `orchestration_mode: api` for split planner/evaluator |
-| `OPENAI_API_KEY` | OpenAI API (Codex uses it instead of subscription auth) |
-| `GEMINI_API_KEY` | Gemini API (via OpenRouter routing through Claude Code, or via Codex with a custom provider) |
-| `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | OpenRouter API — point Claude Code at OpenRouter's Anthropic-compatible endpoint, with the token set to your OpenRouter key |
-
-With `--claude-code`, `--claude-sdk`, or `--codex` in the default runner mode and a paid subscription for the matching agent, **no env var is needed**.
+`planner_model` / `generator_model` / `evaluator_model` apply to `api` orchestration mode; runner mode uses `code_runner_model`. `output_dir` is always saved as an absolute path. Most fields can be edited while a run is going: Harness re-reads the file between features and between iterations (identity fields such as `output_dir` and `code_runner` are pinned).
 
 ---
 
-## Runner Pre-flight Checks
-
-Every runner validates itself before the first feature runs. If something is wrong (missing binary, no API key), you get a clear red panel and the harness exits immediately — no wasted planner calls:
-
-```
-╭── Cannot start ──────────────────────────────────────────────────────╮
-│ Runner error: subprocess                                              │
-│                                                                       │
-│ `claude` binary not found on PATH.                                    │
-│ Install Claude Code: https://claude.ai/download                       │
-╰───────────────────────────────────────────────────────────────────────╯
-```
-
----
-
-## Running Tests
+## Other commands
 
 ```bash
-conda activate harness
-python -m pytest tests/ -v          # 99+ tests, no API key needed — all mocked
-python -m pytest tests/test_runners.py -v   # runner-specific coverage
+harness runners                                   # runners and requirements
+harness init <config> "<brief>"                   # initializer only
+harness plan <config>                             # planner only
+harness animation-theme "moonlit ritual" --runner codex   # re-theme the wait animation
 ```
+
+The wait animation (`progress_animation`, `progress_phrase_style`, `progress_text_effect`) renders only in interactive terminals; disable it with `HARNESS_NO_SPINNER=1`.
 
 ---
 
-## Cost Reference
+## Development
 
-| Mode | Billing model | Typical cost per feature (5 iterations) |
-|--------|--------------|----------------------------------------|
-| Claude subscription | Pro / Max plan | ~$0 extra (counts against plan quota) |
-| Codex subscription | OpenAI Plus | ~$0 extra (counts against plan quota) |
-| Claude API | ~$15/$75 per 1M tokens (Opus 4.7) | ~$2–8 |
-| OpenAI API | ~$5/$15 per 1M tokens (GPT-4o-class) | ~$1–4 |
-| Gemini API | ~$1.25/$10 per 1M tokens (2.5 Pro) | ~$0.5–2 |
-| OpenRouter API | Model-dependent | Varies |
+```bash
+pip install -e ".[dev]"
+ruff check .
+python -m pytest -q                                    # no claude/codex/gh/API key needed
+HARNESS_PACKAGING_TESTS=1 python -m pytest tests/test_packaging.py   # wheel → clean venv → harness --help
+```
 
-In `api` orchestration mode (`--with-api`), add ~$0.50–1.00 per feature for planner + evaluator overhead billed to `ANTHROPIC_API_KEY`. In default `runner` mode this overhead is zero.
+CI (`.github/workflows/ci.yml`) runs lint, the suite with the coding-agent and GitHub CLIs removed from `PATH`, and the packaging check on Python 3.11 and 3.12, on Ubuntu and macOS.
+
+## Project structure
+
+```
+harness/
+├── cli.py                  # `harness` entry point (harness.cli:main)
+├── config.py               # HarnessConfig, RunnerProfile, secret checks
+├── orchestrator.py         # phases, GAN loop, recovery commits, resets, rotation
+├── agents/
+│   ├── base.py             # API calls, runner calls, api-mode tool loop, permissions
+│   ├── initializer.py      # features.json + init script + first commit
+│   ├── planner.py          # brief → spec; interactive alignment
+│   ├── generator.py        # sprint contract + feature implementation
+│   ├── evaluator.py        # scoring: parse, clamp, weights, floor
+│   ├── reviewer.py         # REVIEW.md for imported / finished repos
+│   ├── tools.py            # api-mode inspection tools (read/list/search/run)
+│   └── browser.py          # experimental Playwright MCP for the evaluator
+├── runners/                # subprocess (claude), sdk, codex; rate-limit parsing
+├── progress/               # models, tracker (atomic saves, state guard), attempts notes
+├── context/                # handoff documents, reset budget
+├── session/opener.py       # session preamble + startup checklist
+├── auto_resume.py          # launchd / systemd / Task Scheduler
+├── project_git.py          # recovery commits, attempt branches, GitHub sync
+├── import_repo.py          # `harness import` stage detection
+├── preflight.py            # `harness setup` tool checks
+├── runner_profiles.py      # setup.json, role fallback chains
+├── timeutil.py             # UTC helpers
+└── ui/spinner.py           # wait animation
+tests/                      # pytest suite (see conftest.py: no real binaries)
+docs/                       # PRD, ADRs, architecture, runbook, test plan, diagrams
+examples/                   # web_app.yaml, game.yaml
+```

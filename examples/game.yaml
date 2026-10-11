@@ -7,6 +7,11 @@ brief: >
 
 output_dir: "./output/game"
 
+# Runner mode (the default): every agent runs through the coding-agent
+# runner, so a Claude subscription is the only requirement.
+orchestration_mode: "runner"
+code_runner: "subprocess"   # subprocess | sdk | codex
+
 planner_model: "claude-opus-4-7"
 generator_model: "claude-opus-4-7"
 evaluator_model: "claude-opus-4-7"
@@ -19,6 +24,8 @@ evaluator_weights:
   originality: 0.25
   craft: 0.20
   functionality: 0.30   # games are more functionality-weighted
+
+evaluator_functionality_floor: 6.0   # a feature that does not work never passes
 
 sprint_contract_enabled: true
 context_reset_threshold_tokens: 150000

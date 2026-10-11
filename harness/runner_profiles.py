@@ -52,15 +52,22 @@ def save_setup(setup: HarnessSetup, path: str | Path | None = None) -> Path:
     return setup_path
 
 
-def apply_setup_defaults(config: HarnessConfig, setup: HarnessSetup | None = None) -> bool:
+def apply_setup_defaults(config: HarnessConfig, setup: HarnessSetup | None = None) -> list[str]:
+    """Fill a project config from ~/.harness/setup.json. Returns changed fields.
+
+    Only fills what the project left unset (P-21): in particular a project
+    that chose orchestration_mode explicitly keeps it — setup never flips
+    an api-mode project to runner mode behind its back. The returned list
+    is empty (falsy) when nothing changed.
+    """
     setup = setup if setup is not None else load_setup()
     if setup is None or not setup.runner_profiles:
-        return False
+        return []
 
-    changed = False
+    changed: list[str] = []
     if not config.runner_profiles:
         config.runner_profiles = [p.model_copy(deep=True) for p in setup.runner_profiles]
-        changed = True
+        changed.append("runner_profiles")
 
     for field in (
         "planner_runner_order",
@@ -70,23 +77,27 @@ def apply_setup_defaults(config: HarnessConfig, setup: HarnessSetup | None = Non
     ):
         if not getattr(config, field) and getattr(setup, field):
             setattr(config, field, list(getattr(setup, field)))
-            changed = True
+            changed.append(field)
 
+    # The rotation policy is global: `harness setup` decides it.
     if config.fallback_on_rate_limit != setup.fallback_on_rate_limit:
         config.fallback_on_rate_limit = setup.fallback_on_rate_limit
-        changed = True
+        changed.append("fallback_on_rate_limit")
 
     first_generator = first_profile_for_role(config, "generator")
     if first_generator is not None:
         if not config.code_runner:
             config.code_runner = first_generator.runner
-            changed = True
+            changed.append("code_runner")
         if not config.code_runner_model and first_generator.model:
             config.code_runner_model = first_generator.model
-            changed = True
-        if config.orchestration_mode != "runner":
+            changed.append("code_runner_model")
+        if (
+            "orchestration_mode" not in config.model_fields_set
+            and config.orchestration_mode != "runner"
+        ):
             config.orchestration_mode = "runner"
-            changed = True
+            changed.append("orchestration_mode")
 
     return changed
 

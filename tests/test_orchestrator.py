@@ -219,7 +219,9 @@ class TestOrchestratorPhases:
 
             orchestrator.run()
 
-        assert created["sonnet"][0].implement.call_count == 1
+        # Preflight (P-25) also instantiates profile runners, so count calls
+        # across every instance of a profile.
+        assert sum(r.implement.call_count for r in created["sonnet"]) == 1
         assert any(r.implement.call_count >= 1 for r in created["gpt-5.2"])
 
 

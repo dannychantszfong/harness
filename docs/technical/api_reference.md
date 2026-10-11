@@ -214,7 +214,8 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 |-------|------|---------|-------------|
 | `project_name` | str | required | Project identifier |
 | `brief` | str | required | 1–4 sentence project description |
-| `output_dir` | str | `"./output"` | Where files are written |
+| `output_dir` | str | `"./output"` | Where files are written; saved as an absolute path (`harness resume` pins it to the project directory) |
+| `orchestration_mode` | `"runner"`\|`"api"` | `"runner"` | Who runs planner/evaluator: the coding-agent runner, or the Anthropic API (`ANTHROPIC_API_KEY`) |
 | `code_runner` | str\|None | `None` | Runner to use (prompts if None) |
 | `planner_model` | str | `"claude-opus-4-7"` | Model for PlannerAgent in `orchestration_mode='api'` |
 | `generator_model` | str | `"claude-opus-4-7"` | Reserved for `orchestration_mode='api'` |
@@ -226,9 +227,9 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 | `evaluator_runner_order` | list[str] | `[]` | Evaluator profile whitelist and priority order |
 | `reviewer_runner_order` | list[str] | `[]` | Reviewer profile whitelist and priority order |
 | `fallback_on_rate_limit` | bool | `True` | Move to the next role profile when the current runner reports a usage cap |
-| `openai_api_key` | str\|None | `None` | Documents the OpenAI key the project expects (set `OPENAI_API_KEY` env var to use it) |
-| `gemini_api_key` | str\|None | `None` | Documents the Gemini key the project expects (set `GEMINI_API_KEY` env var) |
-| `openrouter_api_key` | str\|None | `None` | Documents the OpenRouter key the project expects (set `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`) |
+| `openai_api_key` | str\|None | `None` | Documents the OpenAI key the project expects; must be an env reference such as `"$OPENAI_API_KEY"` (literals are rejected) |
+| `gemini_api_key` | str\|None | `None` | Same, e.g. `"$GEMINI_API_KEY"` |
+| `openrouter_api_key` | str\|None | `None` | Same, e.g. `"$OPENROUTER_API_KEY"` (route with `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`) |
 | `init_script` | str\|None | platform-derived | Optional startup script filename override inside `output_dir` |
 | `init_script_type` | `"bash"`\|`"powershell"`\|`"cmd"`\|None | platform-derived | Startup script flavor; defaults to bash on macOS/Linux and PowerShell on Windows |
 | `startup_command` | str\|None | platform-derived | Optional command override for generator/evaluator startup checks |
@@ -244,7 +245,19 @@ config = HarnessConfig.from_file("output/web_app_a3f8c21b/harness_config.json")
 | `evaluator_weights.design_quality` | float | `0.30` | |
 | `evaluator_weights.originality` | float | `0.30` | |
 | `evaluator_weights.craft` | float | `0.25` | |
-| `evaluator_weights.functionality` | float | `0.15` | |
+| `evaluator_weights.functionality` | float | `0.15` | Weights must sum to 1.0 (validated on load) |
+| `evaluator_functionality_floor` | float | `6.0` | A feature passes only if functionality ≥ floor as well (ADR-013) |
+| `runner_timeout_seconds` | int | `1800` | Runner session timeout; a timed-out generator session is a failed iteration |
+| `planner_timeout_seconds` / `evaluator_timeout_seconds` | int\|None | `None` | Per-role overrides of the runner timeout |
+| `sdk_max_turns` | int | `100` | `max_turns` for the `sdk` runner |
+| `read_only_roles` | list[str] | `["planner", "evaluator", "contract"]` | Roles whose runner sessions cannot write files (C-06) |
+| `role_allowed_tools` | dict[str, list[str]] | `{}` | Claude Code permission rules per role, overriding the built-in read-only list |
+| `test_command` | str\|None | `None` | Project test command, allow-listed for read-only roles and the api-mode `run_command` tool |
+| `api_tool_rounds` | int | `20` | api mode: inspection rounds before `submit_evaluation` is forced (ADR-016) |
+| `api_command_timeout_seconds` | int | `120` | api mode: timeout per `run_command` |
+| `auto_resume_on_rate_limit` | bool | `True` | Schedule a one-shot OS job to resume after a usage-cap reset |
+| `evaluator_browser_verification` | bool | `False` | Experimental: Playwright MCP for runner-mode evaluators on Claude Code |
+| `evaluator_mcp_config` | str\|None | `None` | MCP config for browser verification (default: `.harness/playwright-mcp.json`) |
 
 ---
 
@@ -276,17 +289,21 @@ from harness.runners import create_runner, RunnerType, RunResult
 runner = create_runner(RunnerType.SUBPROCESS, config)
 
 result: RunResult = runner.implement(
-    prompt="Implement the login feature...",
-    cwd="/path/to/project",
-    timeout_seconds=600,
+    prompt="Implement the login feature...",   # piped via stdin, never argv
+    cwd="/path/to/project",                    # must exist (reported as such)
+    timeout_seconds=None,                      # None → config.runner_timeout_seconds
+    access=None,                               # RunnerAccess(read_only=True, ...) for restricted roles
 )
 
 print(result.success)          # bool
 print(result.output)           # self-evaluation text
 print(result.error)            # None if success
-print(result.input_tokens)     # int | None (populated by SDK runner)
+print(result.input_tokens)     # int | None — new prompt tokens (uncached + cache writes), all runners
 print(result.output_tokens)    # int | None
-print(result.cost_usd)         # float | None
+print(result.cache_read_tokens)  # int | None — prompt-cache reads
+print(result.cost_usd)         # float | None — runtime's figure (API-equivalent on a subscription)
+print(result.session_id)       # str | None
+print(result.timed_out)        # bool
 print(result.tool_calls_observed)  # list[str] (SDK runner only)
 print(result.rate_limit_reset_at)  # datetime | None (set if a subscription cap is hit)
 ```

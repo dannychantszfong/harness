@@ -1,7 +1,16 @@
 # Documentation Index — Claude Agent Harness
 
 **Version:** 2.0  
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-10-11  
+
+---
+
+## Plans
+
+| File | Description |
+|------|-------------|
+| [HARNESS_1.0_POLISH.md](HARNESS_1.0_POLISH.md) | Harness 1.0 completion and polish plan (P-xx defects, C-xx capabilities, D-01–D-04) |
+| [notes/](notes/) | Owner's working notes (roadmap, documentation and diagram checklists) |
 
 ---
 
@@ -35,7 +44,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 |------|-------------|
 | [architecture.md](technical/architecture.md) | 6-layer breakdown, runner families, agent roles, data model |
 | [api_reference.md](technical/api_reference.md) | CLI commands, Python API, JSON config reference, env vars |
-| [ADR.md](technical/ADR.md) | 10 Architecture Decision Records (ADR-007–010 cover v2 runner design) |
+| [ADR.md](technical/ADR.md) | 16 Architecture Decision Records (ADR-013–016: Harness 1.0 decisions D-01–D-04) |
 
 ---
 
@@ -43,7 +52,7 @@ Open `.drawio` files in [draw.io desktop](https://github.com/jgraph/drawio-deskt
 
 | File | Description |
 |------|-------------|
-| [runbook.md](operational/runbook.md) | SOP, runner quick reference, 12 incident procedures |
+| [runbook.md](operational/runbook.md) | SOP, resume behaviour, auto-resume backends (with the C-08 validation record), SDK migration path, incident procedures |
 | [deployment_guide.md](operational/deployment_guide.md) | Conda setup, Docker, cost table per runner, background jobs |
 
 ---

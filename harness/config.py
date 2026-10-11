@@ -125,6 +125,14 @@ class HarnessConfig(BaseModel):
     # api-mode evaluator's run_command tool (e.g. "npm test", "pytest -q").
     test_command: Optional[str] = None
 
+    # Experimental (C-07): give the runner-mode evaluator a Playwright MCP
+    # browser to exercise acceptance criteria (Claude Code runners only —
+    # ignored with a warning on Codex). evaluator_mcp_config points at an MCP
+    # config JSON ({"mcpServers": {...}}); None → Harness writes
+    # .harness/playwright-mcp.json running `npx -y @playwright/mcp@latest`.
+    evaluator_browser_verification: bool = False
+    evaluator_mcp_config: Optional[str] = None
+
     # api mode only (ADR-016): the evaluator inspects the project through a
     # bounded tool loop before it must call submit_evaluation.
     api_tool_rounds: int = Field(default=20, ge=0)
@@ -190,10 +198,10 @@ class HarnessConfig(BaseModel):
 
     # ── Orchestration mode ──────────────────────────────────────────────────
     # "runner" — planner + evaluator use the same runner as the generator.
-    #            Subscription runners need no ANTHROPIC_API_KEY.
+    #            Subscription runners need no ANTHROPIC_API_KEY. (default)
     # "api"    — planner + evaluator always call the Anthropic API directly.
     #            ANTHROPIC_API_KEY is always required.
-    orchestration_mode: Literal["api", "runner"] = "api"
+    orchestration_mode: Literal["api", "runner"] = "runner"
 
     # ── Runner selection ────────────────────────────────────────────────────
     # Which coding-agent the GeneratorAgent uses to implement features.

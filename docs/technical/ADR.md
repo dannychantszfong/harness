@@ -1,6 +1,6 @@
 # Architecture Decision Records — Claude Agent Harness
 
-**Last updated:** 2026-05-03  
+**Last updated:** 2026-10-11  
 
 ---
 
@@ -250,3 +250,157 @@ without overstating support.
   those when we have hosts to test on.
 - The runbook lists the known pitfalls per backend so users have a
   starting point if a backend silently does nothing.
+
+**Update 2026-10-11 (Harness 1.0, C-08):** the Task Scheduler backend was
+validated on a real Windows 10 host: a one-shot resume fired at the
+scheduled time, ran `harness resume` on a project whose path contains a
+space and non-ASCII characters, corrected a relative `output_dir`, exited 0
+and deleted its task. It is now registered from an XML task definition
+(locale-independent start time, `StartWhenAvailable`) instead of
+`/SC ONCE /SD <locale date>`, so it is **supported**. The systemd backend
+gained `Persistent=true` and a user-session check but has still not run on
+a real Linux host — it stays **experimental**. launchd remains supported.
+
+---
+
+## ADR-013: Functionality Floor on Top of the Weighted Score
+
+**Status:** Accepted (decision D-01)
+**Date:** 2026-10-11
+
+### Context
+The pass decision was `overall ≥ evaluator_pass_score` only. With the
+default weights a feature scoring 9/9/9 on design, originality and craft
+but 3 on functionality averages 8.1 and passes. ADR-002 defines
+functionality as "does it work correctly end-to-end"; a weighted average
+cannot express a hard requirement. The model's self-reported overall score
+was also trusted, and the configured weights were never used.
+
+### Decision
+- Harness always computes `overall = Σ score_i × weight_i` from the four
+  sub-scores and the configured weights; the model's reported overall is
+  stored as `reported_overall` for diagnostics only.
+- A feature passes only if `overall ≥ evaluator_pass_score` **and**
+  `functionality ≥ evaluator_functionality_floor` (default 6.0).
+- Weights must sum to 1.0 (validated on load) and are rendered into the
+  evaluator prompts. Scores are clamped to 1–10; unreadable output is an
+  explicit parse failure, re-asked once, never a silent 5.0.
+
+### Rationale
+The GAN gate is only as strong as its verdict. A refinement of the
+existing scoring — not a new scheme — closes the "beautiful but broken"
+hole without changing anyone's weights.
+
+### Consequences
+- Some features that used to pass now iterate further.
+- `EvaluationResult` gains `parse_failed`, `reported_overall` and
+  `failure_reason`; old `features.json` files still load.
+
+---
+
+## ADR-014: Keep the Frozen claude-code-sdk for 1.0
+
+**Status:** Accepted (decision D-02)
+**Date:** 2026-10-11
+
+### Context
+The `sdk` runner uses `claude-code-sdk`, frozen at 0.0.25 and superseded
+by `claude-agent-sdk`. The runner read the result message wrongly (usage
+is a dict, the cost field is `total_cost_usd`, `is_error` and `result`
+were ignored). Migrating changes more than the import name:
+`ClaudeCodeOptions` → `ClaudeAgentOptions`, Claude Code's system-prompt
+preset is no longer included unless requested, and settings sources are
+not loaded by default — all of which could change how the runner behaves.
+
+### Decision
+Fix the field handling in place, pin `claude-code-sdk==0.0.25`, and note
+in preflight that the runner uses the frozen SDK with migration planned
+for 1.1 (preflight warns when another version is installed). The
+`subprocess` runner calls the `claude` binary directly and is unaffected.
+
+### Rationale
+0.0.25 spawns the same `claude` CLI and still works; a migration with
+behavioural side effects does not belong in a completion release.
+
+### Consequences
+- Re-evaluate if the pinned SDK breaks against a newer CLI.
+- The migration path is in the runbook ("SDK runner: migration to
+  claude-agent-sdk").
+
+---
+
+## ADR-015: Harness-Owned Recovery Points; Revert Exhausted Attempts
+
+**Status:** Accepted (decision D-03)
+**Date:** 2026-10-11
+
+### Context
+PRD P1 and US-08 require a git commit per passing feature as a recovery
+point. Harness relied on the generator obeying a prompt line. When a
+feature exhausted its iteration budget, its half-built code stayed in the
+working tree and the next feature started on a broken baseline.
+
+### Decision
+- After a feature passes, Harness commits the working tree itself
+  (`feat(<id>): <name> — score <x>`) and records `Feature.commit_sha`;
+  `Feature.base_commit_sha` records HEAD when the feature started.
+- When a feature exhausts its budget:
+  1. the attempt is committed and preserved on
+     `harness/attempt/<feature-id>/<n>` — never deleted;
+  2. `.harness/attempts/<feature-id>.md` records every evaluation, the
+     failure pattern, the generator's last self-evaluation and the branch;
+  3. the working branch is `git reset --hard` to `base_commit_sha`, with
+     Harness state files snapshotted before and restored after;
+  4. any later attempt at the feature gets the attempts file as "lessons
+     from previous attempts";
+  5. the final panel, `progress.md` and `harness status` list exhausted
+     features with their notes and branch.
+- Git operations run only when the project directory is the root of its
+  own repository — never on a parent repo.
+
+### Rationale
+"Revert to the last stable state, but keep the failed attempt for later
+reference": every feature starts from a passing baseline, and no work is
+lost.
+
+### Consequences
+- The iteration budget is per feature across runs; raising
+  `max_iterations_per_feature` re-queues exhausted features.
+- Without git (or outside a repo root) Harness still writes the notes but
+  cannot commit, branch or revert, and says so.
+
+---
+
+## ADR-016: Bounded Tool Loop for the API-Mode Evaluator
+
+**Status:** Accepted (decision D-04, option a)
+**Date:** 2026-10-11
+
+### Context
+In `orchestration_mode: api` the evaluator was a single
+`messages.create` with only `submit_evaluation`. Its prompt asked it to run
+the startup command and navigate the app, which it could not do, so it
+graded the generator's self-report — the bias ADR-002 set out to remove.
+
+### Decision
+`BaseAgent._call_with_tools` runs a bounded tool loop: `read_file`,
+`list_files`, `search`, and `run_command` restricted to an allow-list (the
+startup command, `test_command`, `git diff|log|status|show`), confined to
+the project directory, without a shell, with the process tree killed on
+timeout (`api_command_timeout_seconds`). After `api_tool_rounds` rounds
+(default 20) the final tool is forced. The allow-list is the permission
+boundary; which tools to use, and in what order, is the evaluator's own
+judgement. The api-mode initializer reuses the loop to read an imported
+repo.
+
+The runner-mode counterpart is role-appropriate permissions (C-06):
+planner, evaluator and sprint-contract sessions are read-only.
+
+### Rationale
+Evaluation must be based on the project, not on the generator's account
+of it, in both orchestration modes.
+
+### Consequences
+- API-mode evaluations cost more tokens (bounded by `api_tool_rounds`).
+- Commands that need a shell (pipes, `&&`) are refused; put them in the
+  startup script or the test command.

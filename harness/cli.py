@@ -232,8 +232,12 @@ def _print_project_git_sync_result(result) -> None:
 
 def _apply_saved_setup(config: HarnessConfig) -> None:
     setup = load_setup()
-    if setup and apply_setup_defaults(config, setup):
-        console.print(f"[dim]Loaded runner setup from {default_setup_path()}[/dim]")
+    changed = apply_setup_defaults(config, setup) if setup else []
+    if changed:
+        console.print(
+            f"[dim]Loaded runner setup from {default_setup_path()} "
+            f"(set: {', '.join(changed)})[/dim]"
+        )
 
 
 def _resolve_new_runner(

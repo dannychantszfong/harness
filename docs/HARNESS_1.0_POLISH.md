@@ -1,6 +1,6 @@
 # Harness 1.0 — Completion & Polish Plan
 
-**Status:** Draft for owner review
+**Status:** Implemented 2026-10-11 on branch `harness-1.0` (tags `v1.0-a` … `v1.0-e`) — see §9 for the record
 **Baseline:** `harness-main` snapshot reviewed 2026-10-11 — 185 tests passing (2 skipped) on Python 3.12
 **Scope:** Finish the *original* design as recorded in `docs/product/PRD.md` (v2.0), `docs/product/user_stories.md` and `docs/technical/ADR.md` (ADR-001 … ADR-012). This is a completion plan, not a redesign.
 
@@ -321,3 +321,31 @@ Each phase ends with the full test suite green and a tag.
 ## 8. Out of scope for 1.0 (belongs to Harness 2.0)
 
 Jira or any external backlog as source of truth · orchestrator / coder role split · human escalation tickets and non-blocking scheduling · milestone acceptance by a human · event log and dashboard · agent-runtime × model-provider connector matrix (Gemini CLI, Copilot CLI, …) · orchestrator-driven spec extension · ingestion of externally produced kickoff documents. None of these should be started in the 1.0 tree; the fork point is the end of Phase A.
+
+---
+
+## 9. Implementation record (2026-10-11)
+
+Branch `harness-1.0`, one commit and tag per phase: `v1.0-a` (fork point for Harness 2.0), `v1.0-b`, `v1.0-c`, `v1.0-d`, `v1.0-e`. Suite: 333 passed, 3 skipped (macOS-only launchd tests and the opt-in packaging build), also with `claude`, `codex` and `gh` removed from `PATH`.
+
+**Scope notes**
+
+- Pulled forward: the runner half of C-01 (JSON / event-stream parsing) went into Phase A with P-10, since both rewrite the runners; P-26 and P-27 went into Phase B with the feature-loop rewrite.
+- C-07 is implemented as **experimental** (runner mode, Claude Code runners only, off by default); the Playwright sentence appears in the evaluator prompt only when the session really has the browser.
+- C-08: Task Scheduler validated on a real Windows host (runbook "Auto-resume backends"); systemd has **not** run on a real Linux host and stays experimental; launchd was not re-run on a real Mac in this pass (its Darwin-only tests run in CI on macOS).
+- Found and fixed along the way: Windows `.cmd` shims not found by bare name (`codex`, `npm`); Rich swallowing `[f1]` in `status`; git operations that could hit a *parent* repo when a project's own `git init` failed (now restricted to the project's repo root); scheduler wrappers lacking `PATH`; `schtasks /SD` depending on the system locale; BOM-less PowerShell wrappers mangling non-ASCII paths.
+- Verified against the installed CLIs: `claude` 2.1.296 (stdin prompt, `--output-format json` shape, `--permission-mode dontAsk` + `--allowedTools` enforcement) and `codex-cli` 0.160 (`exec -`, `--json` events, `--output-last-message`, `--sandbox read-only`).
+
+**Definition of Done (§5)**
+
+| # | Item | Status |
+|---|---|---|
+| 1 | All P-xx fixed, each with a regression test | done |
+| 2 | C-01…C-06, C-09, C-10 complete; C-07/C-08 complete or listed as experimental | done (C-07 experimental; C-08 partial, documented) |
+| 3 | ADR-013…ADR-016 recorded | done |
+| 4 | `pip install .` into a clean venv → `harness --help` | done locally (wheel → fresh venv); also a CI step |
+| 5 | `pytest` passes with no `claude`/`codex`/`gh` on PATH | done locally; CI removes them before testing |
+| 6 | CI green on 3.11/3.12, Ubuntu/macOS | workflow added; not run yet (branch not pushed) |
+| 7 | Manual end-to-end on a clean machine | **not done** — needs real agent runs on a subscription; the scheduled-resume part was exercised (Windows) |
+| 8 | README claims match default behaviour | done |
+| 9 | Success metrics measurable | done: reset/handoff test, per-feature cost in `harness status`, runner-error tests |

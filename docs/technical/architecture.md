@@ -19,7 +19,7 @@ This document describes the layers that make up the system, their responsibiliti
 ```
                            ┌────────────────────────────┐
                            │  CLI                       │
-                           │  cli.py                    │
+                           │  harness/cli.py            │
                            └─────┬─────────────────┬────┘
                                  │                 │
                                  │  invokes        │  setup-only
@@ -189,7 +189,7 @@ The single coordinator. Largest module by far (~700 LOC) because it ties togethe
 
 `QuietAnimator` — terminal animation while runners are silent. TTY-gated; opt-out via `HARNESS_NO_SPINNER=1`. Cross-platform (Rich handles Windows console).
 
-### Layer 12 — CLI ([cli.py](../../cli.py))
+### Layer 12 — CLI ([harness/cli.py](../../harness/cli.py))
 
 Click commands: `new`, `resume`, `import`, `run`, `setup`, `runners`, `status`, `plan`, `init`, `animation-theme`. Translates flags into a `HarnessConfig`, hands off to `Orchestrator.run()`. The CLI is intentionally a thin layer — all behavior lives in the modules above.
 

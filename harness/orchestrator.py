@@ -72,6 +72,8 @@ class Orchestrator:
         "evaluator_pass_score",
         "evaluator_weights",
         "evaluator_functionality_floor",
+        "evaluator_browser_verification",
+        "evaluator_mcp_config",
         "read_only_roles",
         "role_allowed_tools",
         "test_command",
@@ -213,6 +215,9 @@ class Orchestrator:
         """Audit-only path: run ReviewerAgent, write REVIEW.md, exit clean."""
         from harness.agents.reviewer import ReviewerAgent
         console.print("\n[bold blue]Phase: Review[/bold blue]")
+        if self.config.orchestration_mode == "runner" and self.config.runner_profiles:
+            # The reviewer may rotate onto a runtime no other role uses.
+            self._preflight_or_exit(self._preflight_targets(["reviewer"]))
         # Load progress if features.json exists; otherwise proceed without it.
         progress = None
         try:
@@ -977,57 +982,94 @@ class Orchestrator:
         )
 
     def _print_runner_status(self) -> None:
-        """Run preflight check and print a clear status banner. Abort on failure."""
-        from rich.panel import Panel as RichPanel
+        """Preflight every runner this run will use; print the banner. Abort on failure.
+
+        P-25: with runner_profiles, the first profile of each role in use is
+        checked (deduplicated by runtime) — rotation does not skip the
+        readiness check. The reviewer's runner is checked when a review runs.
+        """
+        roles = ["generator"]
+        if self.config.orchestration_mode == "runner":
+            roles = ["planner", "generator", "evaluator"]
         if self.config.runner_profiles:
-            lines = ["[bold]Runner rotation enabled[/bold]"]
-            for role in ("planner", "generator", "evaluator", "reviewer"):
-                profiles = role_profiles(self.config, role)
-                order = " → ".join(
-                    f"{p.name} ({p.runner}{f'/{p.model}' if p.model else ''})"
-                    for p in profiles
-                )
-                lines.append(f"[dim]{role}:[/dim] {order or 'default runner'}")
-            console.print(
-                RichPanel(
-                    "\n".join(lines),
-                    title="[green]✓ Runner policy ready[/green]",
-                    border_style="green",
-                )
-            )
-            return
+            console.print(self._rotation_panel())
+        checks = self._preflight_targets(roles)
+        self._preflight_or_exit(checks)
+        if self.config.orchestration_mode == "runner" and self.config.evaluator_browser_verification:
+            # C-07 (experimental): the browser must be launchable before the
+            # first evaluation, not discovered missing mid-run.
+            from harness.agents.browser import browser_preflight_error
 
-        pf = self.runner.preflight()
+            error = browser_preflight_error(self.config)
+            if error:
+                console.print(Panel(error, title="[red]Cannot start[/red]", border_style="red"))
+                raise SystemExit(1)
+            console.print("[dim]Browser verification (experimental): Playwright MCP for the evaluator.[/dim]")
 
-        if not pf.ok:
-            console.print(
-                RichPanel(
-                    f"[bold red]Runner error:[/bold red] {self.runner.runner_type.value}\n\n"
-                    f"{pf.error}",
-                    title="[red]Cannot start[/red]",
-                    border_style="red",
-                )
+    def _rotation_panel(self) -> Panel:
+        lines = ["[bold]Runner rotation enabled[/bold]"]
+        for role in ("planner", "generator", "evaluator", "reviewer"):
+            profiles = role_profiles(self.config, role)
+            order = " → ".join(
+                f"{p.name} ({p.runner}{f'/{p.model}' if p.model else ''})"
+                for p in profiles
             )
+            lines.append(f"[dim]{role}:[/dim] {escape(order) or 'default runner'}")
+        return Panel("\n".join(lines), title="[green]✓ Runner policy[/green]", border_style="green")
+
+    def _preflight_targets(self, roles: list[str]) -> list[tuple[str, list[str], object]]:
+        """[(runtime, roles, runner)] — one runner per runtime that will be used."""
+        default_runtime = str(getattr(self.runner.runner_type, "value", self.runner.runner_type))
+        if not self.config.runner_profiles:
+            return [(default_runtime, roles, self.runner)]
+        targets: dict[str, tuple[list[str], object]] = {}
+        for role in roles:
+            profiles = role_profiles(self.config, role)
+            if not profiles:
+                runtime, runner = default_runtime, self.runner
+            else:
+                runtime = profiles[0].runner
+                runner = targets[runtime][1] if runtime in targets else runner_for_profile(
+                    self.config, profiles[0]
+                )
+            entry = targets.setdefault(runtime, ([], runner))
+            entry[0].append(role)
+        return [(runtime, used_by, runner) for runtime, (used_by, runner) in targets.items()]
+
+    def _preflight_or_exit(self, targets) -> None:
+        results = [(runtime, used_by, runner.preflight()) for runtime, used_by, runner in targets]
+        failed = [(runtime, used_by, pf) for runtime, used_by, pf in results if not pf.ok]
+        if failed:
+            body = "\n\n".join(
+                f"[bold red]Runner error:[/bold red] {runtime} "
+                f"[dim](used by {', '.join(used_by)})[/dim]\n{pf.error}"
+                for runtime, used_by, pf in failed
+            )
+            console.print(Panel(body, title="[red]Cannot start[/red]", border_style="red"))
             raise SystemExit(1)
 
         mode = self.config.orchestration_mode
         if mode == "runner":
-            mode_label = "[green]runner mode[/green] — planner + evaluator use this runner too (no API key needed)"
+            mode_label = "[green]runner mode[/green] — planner + evaluator use the coding-agent runner too (no API key needed)"
         else:
             mode_label = "[yellow]api mode[/yellow] — planner + evaluator use Anthropic API (ANTHROPIC_API_KEY required)"
 
-        lines = [
-            f"[bold]{pf.summary}[/bold]",
-            f"[dim]{pf.details}[/dim]",
-            f"\nOrchestration: {mode_label}",
-        ]
-        if pf.warning:
-            lines.append(f"\n[yellow]⚠  {pf.warning}[/yellow]")
-
+        lines: list[str] = []
+        for runtime, used_by, pf in results:
+            if lines:
+                lines.append("")
+            label = f"[bold]{pf.summary}[/bold]"
+            if len(results) > 1 or self.config.runner_profiles:
+                label += f"  [dim]({runtime}: {', '.join(used_by)})[/dim]"
+            lines += [label, f"[dim]{pf.details}[/dim]"]
+            if pf.warning:
+                lines.append(f"[yellow]⚠  {pf.warning}[/yellow]")
+        lines.append(f"\nOrchestration: {mode_label}")
+        runtimes = ", ".join(runtime for runtime, _, _ in results)
         console.print(
-            RichPanel(
+            Panel(
                 "\n".join(lines),
-                title=f"[green]✓ Runner ready[/green]  [dim]({self.runner.runner_type.value})[/dim]",
+                title=f"[green]✓ Runner ready[/green]  [dim]({runtimes})[/dim]",
                 border_style="green",
             )
         )

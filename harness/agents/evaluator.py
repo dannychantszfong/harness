@@ -23,9 +23,16 @@ from typing import Any, Optional
 
 from rich.console import Console
 
+import dataclasses
+
 from harness.agents.base import BaseAgent
+from harness.agents.browser import (
+    PLAYWRIGHT_TOOL_RULE,
+    browser_supported,
+    mcp_config_path,
+)
 from harness.progress.models import EvaluationResult, Feature
-from harness.runners.base import RunnerRateLimitedError
+from harness.runners.base import RunnerAccess, RunnerRateLimitedError
 
 console = Console()
 
@@ -42,17 +49,22 @@ SCORE_MIN, SCORE_MAX = 1.0, 10.0
 RAW_TAIL_CHARS = 3000
 
 
-def system_prompt(config) -> str:
-    """Evaluator instructions with the configured weights and pass rule (P-06)."""
+def system_prompt(config, browser: bool = False) -> str:
+    """Evaluator instructions with the configured weights and pass rule (P-06).
+
+    browser=True adds the Playwright instruction (C-07, experimental); it is
+    only set when the session really has the browser tools.
+    """
     weights = config.evaluator_weights
     criteria = "\n".join(
         f"{i}. **{_LABELS[d][0]}** — {_LABELS[d][1]} (weight: {getattr(weights, d):.0%})"
         for i, d in enumerate(DIMENSIONS, 1)
     )
-    browser = (
-        "\nUse the Playwright browser tools to exercise each acceptance criterion in the "
-        "running app, and report what you observed.\n"
-        if getattr(config, "evaluator_browser_verification", False)
+    browser_line = (
+        "\nYou have Playwright browser tools (mcp__playwright__*). Start the app, then use "
+        "the browser to exercise each acceptance criterion in the running app, and report "
+        "what you observed — page by page, click by click.\n"
+        if browser
         else ""
     )
     return f"""You are an adversarial QA evaluator grading AI-generated software.
@@ -73,7 +85,7 @@ Process:
 3. Check each acceptance criterion against what you actually observed.
 4. Score each dimension honestly.
 5. Write specific, actionable feedback — not vague praise.
-{browser}
+{browser_line}
 You never write or modify code. Do not accept self-reported status from the generator.
 """
 
@@ -266,6 +278,28 @@ class EvaluatorAgent(BaseAgent):
     def run(self, **kwargs):
         raise NotImplementedError("Call evaluate() directly.")
 
+    def _browser_enabled(self) -> bool:
+        """C-07: only runner-mode sessions on Claude Code get the browser."""
+        if not (self.config.evaluator_browser_verification and self._use_runner):
+            return False
+        if browser_supported(self.runner):
+            return True
+        console.print(
+            "    [yellow]evaluator_browser_verification is only supported on the Claude Code "
+            "runners (subprocess, sdk); evaluating without a browser.[/yellow]"
+        )
+        return False
+
+    def _runner_access(self, access_role: str | None = None) -> "RunnerAccess | None":
+        access = super()._runner_access(access_role)
+        if not self._browser_enabled():
+            return access
+        mcp = str(mcp_config_path(self.config))
+        if access is None:
+            return RunnerAccess(mcp_config=mcp)
+        tools = access.allowed_tools + (PLAYWRIGHT_TOOL_RULE,) if access.allowed_tools else ()
+        return dataclasses.replace(access, allowed_tools=tools, mcp_config=mcp)
+
     def evaluate(
         self,
         feature: Feature,
@@ -315,7 +349,7 @@ class EvaluatorAgent(BaseAgent):
         # ── Runner mode: plain text prompt, parse XML response ─────────────
         if self._use_runner:
             prompt = (
-                f"{system_prompt(self.config)}\n\n"
+                f"{system_prompt(self.config, browser=self._browser_enabled())}\n\n"
                 f"{user_content}"
                 "Evaluate the implementation. Run the startup command and test each acceptance "
                 f"criterion. Then output your scores.\n{runner_score_instruction(self.config)}"
